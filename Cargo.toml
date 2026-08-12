@@ -1,0 +1,10 @@
+[workspace]
+resolver = "3"
+members = ["firmware"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "Apache-2.0"
+
+[workspace.dependencies]
