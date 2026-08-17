@@ -1,0 +1,19 @@
+[package]
+name = "opt3001"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+bitfield = "0.19.5"
+defmt = { version = "1.1.1", optional = true }
+embedded-hal-async = { version = "1.0.0" }
+thiserror-no-std = "2.0.2"
+
+[features]
+defmt = ["dep:defmt"]
+registers = []
+
+[dev-dependencies]
+embedded-hal-mock = { version = "0.11.1", features = ["embedded-hal-async"] }
+tokio = { version = "1.53.1", features = ["macros", "rt"] }
