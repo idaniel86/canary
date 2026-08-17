@@ -10,15 +10,16 @@ use opt3001;
 
 mod hardware;
 use hardware::Hardware;
+use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     // Initialize the hardware peripherals
-    let Hardware { i2c } = Hardware::default();
+    let Hardware { i2c_bus } = Hardware::default();
 
     info!("Hello World!");
 
-    let mut opt3001_sensor = opt3001::Opt3001::new(i2c, opt3001::SlaveAddress::default());
+    let mut opt3001_sensor = opt3001::Opt3001::new(I2cDevice::new(&i2c_bus), opt3001::SlaveAddress::default());
     opt3001_sensor
         .set_conversion_mode(opt3001::ConversionMode::Continuous)
         .await

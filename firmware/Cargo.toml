@@ -13,6 +13,7 @@ embassy-executor = { version = "0.10.0", features = ["platform-cortex-m", "execu
 embassy-stm32 = { version = "0.6.0", features = ["stm32h563zi", "memory-x", "time-driver-any", "defmt"] }
 embassy-sync = "0.8.0"
 embassy-time = { version = "0.5.1", features = ["defmt-timestamp-uptime"] }
+embassy-embedded-hal = "0.6.0"
 embedded-hal-async = { version = "1.0.0" }
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 opt3001 = { path = "../opt3001", features = ["defmt"] }
