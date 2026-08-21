@@ -109,7 +109,7 @@ pub fn calc_gas_resistance(gas_adc: u16, gas_range: u8) -> f32 {
 ///
 /// # Returns
 /// The calculated heater resistance value to be set in the sensor.
-pub fn calc_heater_resistance(target_temp: u16, ambient_temp: u16, coeffs: &Coeffs) -> u8 {
+pub fn calc_heater_resistance(target_temp: u16, ambient_temp: i16, coeffs: &Coeffs) -> u8 {
     let target_temp = target_temp.clamp(MIN_HEATER_TEMP_C, MAX_HEATER_TEMP_C);
     let var1 = ((i32::from(ambient_temp) * i32::from(coeffs.g3)) / 1000) * 256;
     let var2 = (i32::from(coeffs.g1) + 784)

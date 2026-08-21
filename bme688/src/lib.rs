@@ -175,8 +175,6 @@ where
     address: u8,
     /// The delay provider for timing operations.
     delay: D,
-    /// The ambient temperature in degrees Celsius.
-    ambient_temp: i16,
     /// The compensation coefficients for the sensor.
     coeffs: Coeffs,
     /// The current state of the sensor (Uninit, Sleep, Forced, Parallel, or Sequential).
@@ -200,7 +198,6 @@ where
             i2c,
             address: address.into(),
             delay,
-            ambient_temp: 25,
             coeffs: Coeffs::default(),
             state: core::marker::PhantomData,
         }
@@ -230,7 +227,6 @@ where
             i2c: self.i2c,
             address: self.address,
             delay: self.delay,
-            ambient_temp: self.ambient_temp,
             coeffs: coeffs.into(),
             state: core::marker::PhantomData,
         })
@@ -294,7 +290,7 @@ where
         for (index, heater_step) in config.heater_profile.iter().enumerate() {
             let res_heat = math::calc_heater_resistance(
                 heater_step.target_temp,
-                self.ambient_temp as u16,
+                config.ambient_temperature,
                 &self.coeffs,
             );
             registers::write_res_heat(&mut self.i2c, self.address, index as u8, res_heat).await?;
@@ -343,6 +339,7 @@ where
             ctrl_gas.set_heater_profile(0);
             registers::write_ctrl_gas(&mut self.i2c, self.address, ctrl_gas).await?;
         }
+        self.set_mode(Mode::Forced).await?;
 
         Ok(config.measurement_duration(Mode::Forced))
     }
