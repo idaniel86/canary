@@ -17,3 +17,5 @@ embassy-embedded-hal = "0.6.0"
 embedded-hal-async = { version = "1.0.0" }
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 opt3001 = { path = "../opt3001", features = ["defmt"] }
+bme688 = { path = "../bme688", features = ["defmt"] }
+static_cell = "2.1.1"

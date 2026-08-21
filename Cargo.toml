@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["firmware", "opt3001"]
+members = ["bme688","firmware", "opt3001"]
 
 [workspace.package]
 edition = "2024"
