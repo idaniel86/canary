@@ -1,0 +1,16 @@
+[package]
+name = "bme688"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+bitfield = "0.19.5"
+defmt = { version = "1.1.1", optional = true }
+embedded-hal-async = { version = "1.0.0" }
+heapless = "0.9.3"
+thiserror-no-std = "2.0.2"
+
+[features]
+defmt = ["dep:defmt"]
+registers = []
