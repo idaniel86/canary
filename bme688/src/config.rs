@@ -36,6 +36,8 @@ where
     pub(crate) shared_heater_duration_ms: u32,
     /// Standby time for sequential mode. This is the duration for which the sensor will be in standby between measurements.
     pub(crate) standby_time: Option<crate::StandbyTime>,
+    /// Ambient temperature
+    pub(crate) ambient_temperature: i16,
     state: core::marker::PhantomData<State>,
 }
 
@@ -52,6 +54,7 @@ where
             heater_profile: heapless::Vec::new(),
             shared_heater_duration_ms: Default::default(),
             standby_time: Default::default(),
+            ambient_temperature: 25,
             state: core::marker::PhantomData,
         }
     }
@@ -153,6 +156,18 @@ where
         self.config.filter = filter;
         self
     }
+
+    /// Set the ambient temperature.
+    /// 
+    /// # Arguments
+    /// * `temperature` - The ambient temperature in degrees Celsius.
+    ///
+    /// # Returns
+    /// The updated `ConfigBuilder` instance.
+    pub fn with_ambient_temperature(mut self, temperature: i16) -> Self {
+        self.config.ambient_temperature = temperature;
+        self
+    } 
 
     /// Finalize the builder and return the constructed `Config` instance.
     ///
