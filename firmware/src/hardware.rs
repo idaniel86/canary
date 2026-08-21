@@ -1,4 +1,4 @@
-use embassy_stm32::{Config, bind_interrupts, dma, i2c, mode, peripherals};
+use embassy_stm32::{Config, bind_interrupts, dma, i2c, mode, peripherals, time};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use static_cell::StaticCell;
 
