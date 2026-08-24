@@ -13,7 +13,7 @@ use opt3001;
 
 mod hardware;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
-use hardware::{Hardware, I2cBus};
+use hardware::{Ethernet, Hardware, I2cBus};
 
 static PRESSURE: AtomicU32 = AtomicU32::new(99999);
 static TEMPERATURE: AtomicI16 = AtomicI16::new(2500);
@@ -33,14 +33,26 @@ impl embedded_hal_async::delay::DelayNs for Delay {
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     // Initialize the hardware peripherals
-    let Hardware { i2c_bus } = Hardware::default();
+    let Hardware {
+        i2c_bus,
+        net_stack,
+        net_runner,
+    } = Hardware::default();
 
     info!("Hello World!");
 
-    // Spawn sensor tasks
+    // Spawn tasks
     spawner.spawn(opt3001_task(&i2c_bus).unwrap());
     spawner.spawn(bme688_task(&i2c_bus).unwrap());
     spawner.spawn(scd41_task(&i2c_bus).unwrap());
+    spawner.spawn(net_task(net_runner).unwrap());
+
+    // Ensure DHCP configuration is up before trying connect
+    net_stack.wait_config_up().await;
+    info!(
+        "Network stack is up. IP address: {}",
+        net_stack.config_v4().unwrap().address
+    );
 
     loop {
         Timer::after(embassy_time::Duration::from_secs(1)).await;
@@ -165,4 +177,9 @@ async fn scd41_task(i2c_bus: &'static I2cBus<'static>) {
             }
         }
     }
+}
+
+#[embassy_executor::task]
+async fn net_task(mut runner: embassy_net::Runner<'static, Ethernet>) -> ! {
+    runner.run().await
 }
