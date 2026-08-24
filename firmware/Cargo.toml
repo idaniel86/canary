@@ -23,6 +23,7 @@ scd4x = { version = "0.5", features = ["scd41", "embedded-hal-async", "defmt"] }
 embassy-net = { version = "0.9.1", features = ["dhcpv4", "tcp", "defmt"] }
 micropb = { version = "0.6", features = ["container-heapless-0-9"] }
 heapless = "0.9"
+embedded-io-async = "0.7.0"
 
 [build-dependencies]
 micropb-gen = "0.6"
