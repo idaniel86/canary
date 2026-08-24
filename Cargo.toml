@@ -8,3 +8,13 @@ version = "0.1.0"
 license = "Apache-2.0"
 
 [workspace.dependencies]
+
+[profile.release]
+debug = 2
+lto = true
+opt-level = 'z'
+
+[profile.dev]
+debug = 2
+lto = true
+opt-level = "z"
