@@ -1,14 +1,19 @@
 #![no_std]
 #![no_main]
 
-use core::sync::atomic::{AtomicI16, AtomicU16, AtomicU32, Ordering};
+use core::str::FromStr;
 
 use {defmt_rtt as _, panic_probe as _}; // global logger + panicking-behavior
 
 use bme688;
 use defmt::*;
 use embassy_executor::Spawner;
+use embassy_sync::{
+    blocking_mutex::raw::NoopRawMutex,
+    channel::{Channel, DynamicReceiver, DynamicSender},
+};
 use embassy_time::Timer;
+use embedded_io_async::Write;
 use opt3001;
 
 mod hardware;
@@ -21,15 +26,7 @@ mod proto {
     include!(concat!(env!("OUT_DIR"), "/readings.rs"));
 }
 
-#[allow(unused_imports)]
 use proto::readings_ as readings;
-
-static PRESSURE: AtomicU32 = AtomicU32::new(99999);
-static TEMPERATURE: AtomicI16 = AtomicI16::new(2500);
-static HUMIDITY: AtomicU16 = AtomicU16::new(6000);
-static LUX: AtomicU16 = AtomicU16::new(0);
-static CO2: AtomicU16 = AtomicU16::new(0);
-static GAS_RESISTANCE: AtomicU32 = AtomicU32::new(0);
 
 struct Delay;
 
@@ -50,10 +47,17 @@ async fn main(spawner: Spawner) {
 
     info!("Hello World!");
 
+    static SENSOR_CHANNEL: static_cell::StaticCell<
+        Channel<NoopRawMutex, readings::SensorReading, 1>,
+    > = static_cell::StaticCell::new();
+    let sensor_channel = SENSOR_CHANNEL.init(Channel::new());
+    let sensor_sender = sensor_channel.dyn_sender();
+    let sensor_receiver = sensor_channel.dyn_receiver();
+
     // Spawn tasks
-    spawner.spawn(opt3001_task(&i2c_bus).unwrap());
-    spawner.spawn(bme688_task(&i2c_bus).unwrap());
-    spawner.spawn(scd41_task(&i2c_bus).unwrap());
+    spawner.spawn(opt3001_task(&i2c_bus, sensor_sender.clone()).unwrap());
+    spawner.spawn(bme688_task(&i2c_bus, sensor_sender.clone()).unwrap());
+    spawner.spawn(scd41_task(&i2c_bus, sensor_sender.clone()).unwrap());
     spawner.spawn(net_task(net_runner).unwrap());
 
     // Ensure DHCP configuration is up before trying connect
@@ -63,21 +67,34 @@ async fn main(spawner: Spawner) {
         net_stack.config_v4().unwrap().address
     );
 
+    static RX_BUFFER: static_cell::StaticCell<[u8; 1024]> = static_cell::StaticCell::new();
+    static TX_BUFFER: static_cell::StaticCell<[u8; 1024]> = static_cell::StaticCell::new();
+    let rx_buffer = RX_BUFFER.init([0; 1024]);
+    let tx_buffer = TX_BUFFER.init([0; 1024]);
+    let mut socket = embassy_net::tcp::TcpSocket::new(net_stack, rx_buffer, tx_buffer);
+    socket.set_timeout(Some(embassy_time::Duration::from_secs(10)));
+
+    const SERVER_ADDRESS: Option<&str> = option_env!("SERVER_ADDRESS");
+
+    let server_address = SERVER_ADDRESS
+        .and_then(|server_address| core::net::SocketAddrV4::from_str(server_address).ok());
+    if let Some(server_address) = server_address {
+        spawner.spawn(tcp_client_task(socket, server_address, sensor_receiver).unwrap());
+    } else {
+        error!("SERVER_ADDRESS environment variable is not set or invalid");
+    }
+
     loop {
-        Timer::after(embassy_time::Duration::from_secs(1)).await;
-        defmt::info!(
-            "Temp: {} °C, Hum: {} %, Press: {} Pa, CO2: {} ppm, Gas: {} Ω",
-            TEMPERATURE.load(Ordering::Relaxed) as f32 / 100.0,
-            HUMIDITY.load(Ordering::Relaxed) as f32 / 100.0,
-            PRESSURE.load(Ordering::Relaxed),
-            CO2.load(Ordering::Relaxed),
-            GAS_RESISTANCE.load(Ordering::Relaxed)
-        );
+        info!("Heartbeat...");
+        Timer::after(embassy_time::Duration::from_secs(60)).await;
     }
 }
 
 #[embassy_executor::task]
-async fn opt3001_task(i2c_bus: &'static I2cBus<'static>) {
+async fn opt3001_task(
+    i2c_bus: &'static I2cBus<'static>,
+    sender: DynamicSender<'static, readings::SensorReading>,
+) {
     let mut sensor =
         opt3001::Opt3001::new(I2cDevice::new(&i2c_bus), opt3001::SlaveAddress::default());
     sensor
@@ -93,13 +110,17 @@ async fn opt3001_task(i2c_bus: &'static I2cBus<'static>) {
             .await
             .map_err(|e| error!("Error reading light intensity: {:?}", e))
         {
-            LUX.store(lux as u16, Ordering::Relaxed);
+            let reading = readings::SensorReading::default().init_lux(lux as u32);
+            sender.send(reading).await;
         }
     }
 }
 
 #[embassy_executor::task]
-async fn bme688_task(i2c_bus: &'static I2cBus<'static>) {
+async fn bme688_task(
+    i2c_bus: &'static I2cBus<'static>,
+    sender: DynamicSender<'static, readings::SensorReading>,
+) {
     let mut sensor = bme688::Bme688::new(
         I2cDevice::new(&i2c_bus),
         bme688::SlaveAddress::default(),
@@ -111,14 +132,12 @@ async fn bme688_task(i2c_bus: &'static I2cBus<'static>) {
     .unwrap();
 
     loop {
-        let ambient_temp = TEMPERATURE.load(Ordering::Relaxed);
         let config = bme688::forced::ConfigBuilder::new()
             .with_temperature_os(bme688::Oversampling::X2)
             .with_pressure_os(bme688::Oversampling::X1)
             .with_humidity_os(bme688::Oversampling::X16)
             .with_filter(bme688::Filter::Off)
             .with_heater_step(300, 150)
-            .with_ambient_temperature(ambient_temp / 100)
             .build();
 
         let duration_us = sensor
@@ -134,8 +153,13 @@ async fn bme688_task(i2c_bus: &'static I2cBus<'static>) {
             .map_err(|e| error!("Error reading BME688 measurements: {:?}", e))
         {
             if let Some(measurement) = measurements.first() {
-                PRESSURE.store(measurement.pressure as u32, Ordering::Relaxed);
-                GAS_RESISTANCE.store(measurement.gas_resistance as u32, Ordering::Relaxed);
+                let mut reading =
+                    readings::SensorReading::default().init_pressure(measurement.pressure as u32);
+                let _ = reading.gas_resistance.push(readings::GasResistance {
+                    profile: measurement.gas_meas_index as u32,
+                    resistance: measurement.gas_resistance as u32,
+                });
+                sender.send(reading).await;
             }
         }
         Timer::after_secs(1).await;
@@ -143,7 +167,10 @@ async fn bme688_task(i2c_bus: &'static I2cBus<'static>) {
 }
 
 #[embassy_executor::task]
-async fn scd41_task(i2c_bus: &'static I2cBus<'static>) {
+async fn scd41_task(
+    i2c_bus: &'static I2cBus<'static>,
+    sender: DynamicSender<'static, readings::SensorReading>,
+) {
     let mut sensor = scd4x::Scd4xAsync::new(I2cDevice::new(&i2c_bus), Delay);
     let _ = sensor.stop_periodic_measurement().await;
     sensor
@@ -159,14 +186,6 @@ async fn scd41_task(i2c_bus: &'static I2cBus<'static>) {
         .unwrap();
 
     loop {
-        // Update ambient pressure
-        let pressure_hpa = (PRESSURE.load(Ordering::Relaxed) / 100) as u16;
-        sensor
-            .set_ambient_pressure(pressure_hpa)
-            .await
-            .map_err(|e| error!("Error setting SCD41 ambient pressure: {:?}", e))
-            .unwrap();
-
         Timer::after(embassy_time::Duration::from_secs(5)).await;
         if let Ok(is_data_ready) = sensor
             .data_ready_status()
@@ -179,9 +198,11 @@ async fn scd41_task(i2c_bus: &'static I2cBus<'static>) {
                     .await
                     .map_err(|e| error!("Error reading SCD41 measurement: {:?}", e))
                 {
-                    CO2.store(measurement.co2, Ordering::Relaxed);
-                    TEMPERATURE.store((measurement.temperature * 100.0) as i16, Ordering::Relaxed);
-                    HUMIDITY.store((measurement.humidity * 100.0) as u16, Ordering::Relaxed);
+                    let reading = readings::SensorReading::default()
+                        .init_co2(measurement.co2 as u32)
+                        .init_temperature(measurement.temperature)
+                        .init_humidity(measurement.humidity);
+                    sender.send(reading).await;
                 }
             }
         }
@@ -191,4 +212,49 @@ async fn scd41_task(i2c_bus: &'static I2cBus<'static>) {
 #[embassy_executor::task]
 async fn net_task(mut runner: embassy_net::Runner<'static, Ethernet>) -> ! {
     runner.run().await
+}
+
+#[embassy_executor::task]
+async fn tcp_client_task(
+    mut socket: embassy_net::tcp::TcpSocket<'static>,
+    remote_endpoint: core::net::SocketAddrV4,
+    receiver: DynamicReceiver<'static, readings::SensorReading>,
+) -> ! {
+    let ip_address = embassy_net::Ipv4Address::from(*remote_endpoint.ip());
+    let port = remote_endpoint.port();
+    const CAPACITY: usize =
+        micropb::size::max_encoded_size::<readings::SensorReading>().next_power_of_two();
+
+    let mut encoder = micropb::PbEncoder::new(heapless::Vec::<u8, CAPACITY>::new());
+
+    loop {
+        match socket.connect((ip_address, port)).await {
+            Ok(_) => {
+                info!("Connected to server at {}", remote_endpoint);
+
+                loop {
+                    let reading = receiver.receive().await;
+                    match encoder.encode_message(&reading) {
+                        Ok(_) => {
+                            if let Err(e) = socket.write_all(encoder.as_writer()).await {
+                                error!("Failed to send data: {:?}", e);
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to encode message: {:?}", e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                error!(
+                    "Failed to connect to server at {}: {:?}",
+                    remote_endpoint, e
+                );
+                Timer::after(embassy_time::Duration::from_secs(5)).await;
+                continue;
+            }
+        }
+    }
 }
