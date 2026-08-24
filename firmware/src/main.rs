@@ -15,6 +15,15 @@ mod hardware;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use hardware::{Ethernet, Hardware, I2cBus};
 
+mod proto {
+    #![allow(clippy::all)]
+    #![allow(nonstandard_style, unused, irrefutable_let_patterns)]
+    include!(concat!(env!("OUT_DIR"), "/readings.rs"));
+}
+
+#[allow(unused_imports)]
+use proto::readings_ as readings;
+
 static PRESSURE: AtomicU32 = AtomicU32::new(99999);
 static TEMPERATURE: AtomicI16 = AtomicI16::new(2500);
 static HUMIDITY: AtomicU16 = AtomicU16::new(6000);

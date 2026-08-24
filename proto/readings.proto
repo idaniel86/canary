@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package readings;
+
+/// SensorReading represents a single reading from a sensor, including temperature, humidity, pressure, CO2 concentration, and gas resistance.
+message SensorReading {
+    /// Temperature in degrees Celsius
+    optional float temperature = 1;
+    /// Humidity in percentage
+    optional float humidity = 2;
+    /// Pressure in Pascals
+    optional uint32 pressure = 3;
+    /// CO2 concentration in parts per million (ppm)
+    optional uint32 co2 = 4;
+    /// Gas resistance in Ohms
+    repeated GasResistance gas_resistance = 5;
+    /// Light intensity in lux
+    optional uint32 lux = 6;
+    /// Noise level in decibels
+    optional uint32 noise = 7;
+}
+
+/// SensorReadings represents a collection of sensor readings, allowing for multiple readings to be stored together.
+message SensorReadings {
+    repeated SensorReading readings = 1;
+}
+
+/// GasResistance represents the gas resistance reading from a sensor, including the profile index and resistance value.
+message GasResistance {
+    /// Gas profile index
+    uint32 profile = 1;
+    /// Gas resistance in Ohms
+    uint32 resistance = 2;
+}

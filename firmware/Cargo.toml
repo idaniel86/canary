@@ -21,3 +21,8 @@ bme688 = { path = "../bme688", features = ["defmt"] }
 static_cell = "2.1.1"
 scd4x = { version = "0.5", features = ["scd41", "embedded-hal-async", "defmt"] }
 embassy-net = { version = "0.9.1", features = ["dhcpv4", "tcp", "defmt"] }
+micropb = { version = "0.6", features = ["container-heapless-0-9"] }
+heapless = "0.9"
+
+[build-dependencies]
+micropb-gen = "0.6"
