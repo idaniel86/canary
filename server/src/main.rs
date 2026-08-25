@@ -1,5 +1,6 @@
 use prost::Message;
 use tokio::io::AsyncReadExt;
+use tokio::sync::broadcast;
 
 mod error;
 mod readings {
@@ -12,13 +13,15 @@ pub use error::Error;
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let tcp_listener = tokio::net::TcpListener::bind("0.0.0.0:9000").await?;
+    let (sensor_tx, _) = broadcast::channel::<readings::SensorReading>(1024);
 
     loop {
         let (socket, addr) = tcp_listener.accept().await?;
         println!("New connection from: {}", addr);
 
+        let sensor_tx = sensor_tx.clone();
         tokio::spawn(async move {
-            handle_connection(socket).await.unwrap_or_else(|e| {
+            handle_connection(socket, sensor_tx).await.unwrap_or_else(|e| {
                 eprintln!("Error handling connection from {}: {}", addr, e);
             });
         });
@@ -49,9 +52,12 @@ async fn read_sensor_readings(
 /// 
 /// # Returns
 /// * `std::io::Result<()>` - Returns `Ok(())` on successful handling of the connection, or an `std::io::Error` if an error occurs during reading or decoding messages.
-async fn handle_connection(mut socket: tokio::net::TcpStream) -> std::io::Result<()> {
+async fn handle_connection(mut socket: tokio::net::TcpStream, sensor_tx: broadcast::Sender<readings::SensorReading>) -> std::io::Result<()> {
     loop {
-        let readings = read_sensor_readings(&mut socket).await?;
-        println!("Received sensor readings: {:?}", readings);
+        // Read a length-delimited `SensorReading` message from the socket.
+        let reading = read_sensor_readings(&mut socket).await?;
+
+        // Send to all subscribed WebSocket clients.
+        let _ = sensor_tx.send(reading);
     }
 }
