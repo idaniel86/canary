@@ -14,6 +14,7 @@ use embassy_sync::{
 };
 use embassy_time::Timer;
 use embedded_io_async::Write;
+use micropb::MessageEncode;
 use opt3001;
 
 mod hardware;
@@ -223,9 +224,7 @@ async fn tcp_client_task(
     let ip_address = embassy_net::Ipv4Address::from(*remote_endpoint.ip());
     let port = remote_endpoint.port();
     const CAPACITY: usize =
-        micropb::size::max_encoded_size::<readings::SensorReading>().next_power_of_two();
-
-    let mut encoder = micropb::PbEncoder::new(heapless::Vec::<u8, CAPACITY>::new());
+        4 + micropb::size::max_encoded_size::<readings::SensorReading>();
 
     loop {
         match socket.connect((ip_address, port)).await {
@@ -234,7 +233,8 @@ async fn tcp_client_task(
 
                 loop {
                     let reading = receiver.receive().await;
-                    match encoder.encode_message(&reading) {
+                    let mut encoder = micropb::PbEncoder::new(heapless::Vec::<u8, CAPACITY>::new());
+                    match reading.encode_len_delimited(&mut encoder){
                         Ok(_) => {
                             if let Err(e) = socket.write_all(encoder.as_writer()).await {
                                 error!("Failed to send data: {:?}", e);
