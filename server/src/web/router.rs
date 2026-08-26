@@ -1,6 +1,7 @@
 use crate::web::handlers;
 use crate::web::state::AppState;
 use axum::{Router, routing::get};
+use tower_http::services::ServeDir;
 
 /// Creates and returns an Axum router configured with the necessary routes and state.
 ///
@@ -13,4 +14,6 @@ pub fn create_router(state: AppState) -> axum::Router {
     Router::new()
         .route("/ws", get(handlers::websocket::websocket_handler))
         .with_state(state)
+        .route("/", get(handlers::dashboard::dashboard_handler))
+        .nest_service("/static", ServeDir::new("static"))
 }

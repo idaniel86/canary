@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns" defer></script>
+    <script src="/static/app.js" defer></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div class="grid grid-cols-2 gap-4">
+        <div>
+            <canvas id="temperature-chart"></canvas>
+        </div>
+        <div>
+            <canvas id="humidity-chart"></canvas>
+        </div>
+        <div>
+            <canvas id="pressure-chart"></canvas>
+        </div>
+        <div>
+            <canvas id="lux-chart"></canvas>
+        </div>
+        <div>
+            <canvas id="co2-chart"></canvas>
+        </div>
+        <div>
+            <canvas id="gas-resistance-chart"></canvas>
+        </div>
+    </div>
+</body>
+</html>
