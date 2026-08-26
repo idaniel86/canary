@@ -1,13 +1,14 @@
 #[derive(serde::Deserialize, Debug)]
 pub struct Config {
     /// The server configuration, including HTTP and TCP addresses.
-    pub server: ServerConfig,
+    pub sensor: SensorConfig,
 }
 
 #[derive(serde::Deserialize, Debug)]
-pub struct ServerConfig {
+pub struct SensorConfig {
     /// The address on which the TCP server will listen for incoming sensor readings.
-    pub sensor_address: std::net::SocketAddr,
+    pub address: std::net::SocketAddr,
+    pub capacity: usize,
 }
 
 impl Config {

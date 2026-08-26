@@ -1,2 +1,3 @@
-[server]
-sensor_address = "0.0.0.0:9000"
+[sensor]
+address = "0.0.0.0:9000"
+capacity = "1024"
