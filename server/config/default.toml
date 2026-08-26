@@ -1,0 +1,2 @@
+[server]
+sensor_address = "0.0.0.0:9000"

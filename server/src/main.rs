@@ -2,6 +2,7 @@ use prost::Message;
 use tokio::io::AsyncReadExt;
 use tokio::sync::broadcast;
 
+mod config;
 mod error;
 mod readings {
     #![allow(clippy::all)]
@@ -12,7 +13,9 @@ pub use error::Error;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let tcp_listener = tokio::net::TcpListener::bind("0.0.0.0:9000").await?;
+    let config = config::Config::load()?;
+
+    let tcp_listener = tokio::net::TcpListener::bind(config.server.sensor_address).await?;
     let (sensor_tx, _) = broadcast::channel::<readings::SensorReading>(1024);
 
     loop {
