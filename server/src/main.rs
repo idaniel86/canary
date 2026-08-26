@@ -5,6 +5,7 @@ mod processing;
 mod protocol;
 mod realtime;
 mod sensor;
+mod web;
 
 pub use error::Error;
 
@@ -16,7 +17,18 @@ async fn main() -> Result<(), Error> {
     let event_bus = realtime::EventBus::new(config.sensor.capacity);
     let pipeline = processing::Pipeline::new(event_bus);
 
-    sensor::server::run(sensor_listener, pipeline).await?;
+    let state = web::AppState {
+        events: pipeline.event_bus.clone(),
+    };
+    let app = web::create_router(state);
+    let listener = tokio::net::TcpListener::bind(config.web.address).await?;
+
+    let (sensor_result, web_result) = tokio::join!(
+        sensor::server::run(sensor_listener, pipeline),
+        axum::serve(listener, app),
+    );
+    sensor_result?;
+    web_result?;
 
     Ok(())
 }

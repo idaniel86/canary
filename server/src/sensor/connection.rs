@@ -28,7 +28,7 @@ pub async fn handle_connection(
         if let Some(temperature) = reading.temperature {
             let sensor_reading = domain::SensorReading {
                 timestamp,
-                sensor: domain::Sensor::Temperature(temperature),
+                sensor: domain::Sensor::Temperature { value: temperature },
             };
             pipeline.process(sensor_reading);
         }
@@ -36,7 +36,7 @@ pub async fn handle_connection(
         if let Some(humidity) = reading.humidity {
             let sensor_reading = domain::SensorReading {
                 timestamp,
-                sensor: domain::Sensor::Humidity(humidity),
+                sensor: domain::Sensor::Humidity { value: humidity },
             };
             pipeline.process(sensor_reading);
         }
@@ -44,7 +44,7 @@ pub async fn handle_connection(
         if let Some(pressure) = reading.pressure {
             let sensor_reading = domain::SensorReading {
                 timestamp,
-                sensor: domain::Sensor::Pressure(pressure),
+                sensor: domain::Sensor::Pressure { value: pressure },
             };
             pipeline.process(sensor_reading);
         }
@@ -52,7 +52,7 @@ pub async fn handle_connection(
         if let Some(co2) = reading.co2 {
             let sensor_reading = domain::SensorReading {
                 timestamp,
-                sensor: domain::Sensor::CO2(co2),
+                sensor: domain::Sensor::CO2 { value: co2 },
             };
             pipeline.process(sensor_reading);
         }
@@ -60,7 +60,7 @@ pub async fn handle_connection(
         if let Some(lux) = reading.lux {
             let sensor_reading = domain::SensorReading {
                 timestamp,
-                sensor: domain::Sensor::Lux(lux),
+                sensor: domain::Sensor::Lux { value: lux },
             };
             pipeline.process(sensor_reading);
         }
