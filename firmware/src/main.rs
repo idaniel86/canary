@@ -132,30 +132,48 @@ async fn bme688_task(
     .map_err(|e| error!("Error initializing BME688 sensor: {:?}", e))
     .unwrap();
 
+    let config = bme688::sequential::ConfigBuilder::new()
+        .with_temperature_os(bme688::Oversampling::X2)
+        .with_pressure_os(bme688::Oversampling::X1)
+        .with_humidity_os(bme688::Oversampling::X16)
+        .with_filter(bme688::Filter::Off)
+        .with_heater_profile(
+            &[
+                bme688::sequential::HeaterStep::new(200, 280),
+                bme688::sequential::HeaterStep::new(225, 280),
+                bme688::sequential::HeaterStep::new(250, 280),
+                bme688::sequential::HeaterStep::new(275, 280),
+                bme688::sequential::HeaterStep::new(300, 280),
+                bme688::sequential::HeaterStep::new(325, 280),
+                bme688::sequential::HeaterStep::new(350, 280),
+                bme688::sequential::HeaterStep::new(375, 280),
+                bme688::sequential::HeaterStep::new(400, 280),
+                bme688::sequential::HeaterStep::new(350, 280),
+            ],
+            Some(bme688::StandbyTime::Ms1000),
+        )
+        .build();
+
+    let duration_us = sensor
+        .start_sequential_measurement(&config)
+        .await
+        .map_err(|e| error!("Error starting BME688 sequential measurement: {:?}", e))
+        .unwrap();
+
+    let duration = (embassy_time::Duration::from_micros(duration_us as u64)
+        + embassy_time::Duration::from_millis(280)) * 3;
+
     loop {
-        let config = bme688::forced::ConfigBuilder::new()
-            .with_temperature_os(bme688::Oversampling::X2)
-            .with_pressure_os(bme688::Oversampling::X1)
-            .with_humidity_os(bme688::Oversampling::X16)
-            .with_filter(bme688::Filter::Off)
-            .with_heater_step(300, 150)
-            .build();
-
-        let duration_us = sensor
-            .start_forced_measurement(&config)
-            .await
-            .map_err(|e| error!("Error starting BME688 forced measurement: {:?}", e))
-            .unwrap();
-
-        Timer::after_micros(duration_us as u64 + 150_000).await;
+        Timer::after(duration).await;
+        
         if let Ok(measurements) = sensor
             .get_measurements()
             .await
             .map_err(|e| error!("Error reading BME688 measurements: {:?}", e))
         {
-            if let Some(measurement) = measurements.first() {
-                let mut reading =
-                    readings::SensorReading::default().init_pressure(measurement.pressure as u32);
+            for measurement in measurements.iter() {
+                let mut reading = readings::SensorReading::default()
+                    .init_pressure(measurement.pressure as u32);
                 let _ = reading.gas_resistance.push(readings::GasResistance {
                     profile: measurement.gas_meas_index as u32,
                     resistance: measurement.gas_resistance as u32,
@@ -163,7 +181,6 @@ async fn bme688_task(
                 sender.send(reading).await;
             }
         }
-        Timer::after_secs(1).await;
     }
 }
 
@@ -223,8 +240,7 @@ async fn tcp_client_task(
 ) -> ! {
     let ip_address = embassy_net::Ipv4Address::from(*remote_endpoint.ip());
     let port = remote_endpoint.port();
-    const CAPACITY: usize =
-        4 + micropb::size::max_encoded_size::<readings::SensorReading>();
+    const CAPACITY: usize = 4 + micropb::size::max_encoded_size::<readings::SensorReading>();
 
     loop {
         match socket.connect((ip_address, port)).await {
@@ -234,7 +250,7 @@ async fn tcp_client_task(
                 loop {
                     let reading = receiver.receive().await;
                     let mut encoder = micropb::PbEncoder::new(heapless::Vec::<u8, CAPACITY>::new());
-                    match reading.encode_len_delimited(&mut encoder){
+                    match reading.encode_len_delimited(&mut encoder) {
                         Ok(_) => {
                             if let Err(e) = socket.write_all(encoder.as_writer()).await {
                                 error!("Failed to send data: {:?}", e);

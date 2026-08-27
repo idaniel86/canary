@@ -447,72 +447,25 @@ function updateCO2Chart(timestamp, value) {
     co2Chart.update("none");
 }
 
+const profileColors = [
+    "#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231",
+    "#911eb4", "#42d4f4", "#f032e6", "#bfef45", "#fabed4"
+];
+
 const gasResistanceChart = new Chart(
     document.getElementById("gas-resistance-chart"),
     {
         type: "line",
 
         data: {
-            datasets: [{
-                label: "Profile 0",
+            datasets: profileColors.map((color, i) => ({
+                label: `Profile ${i}`,
                 data: [],
+                borderColor: color,
+                backgroundColor: color,
                 borderWidth: 2,
-                pointRadius: 0
-            },
-            {
-                label: "Profile 1",
-                data: [],
-                borderWidth: 2,
-                pointRadius: 0
-            },
-            {
-                label: "Profile 2",
-                data: [],
-                borderWidth: 2,
-                pointRadius: 0
-            },
-            {
-                label: "Profile 3",
-                data: [],
-                borderWidth: 2,
-                pointRadius: 0
-            },
-            {
-                label: "Profile 4",
-                data: [],
-                borderWidth: 2,
-                pointRadius: 0
-            },
-            {
-                label: "Profile 5",
-                data: [],
-                borderWidth: 2,
-                pointRadius: 0
-            },
-            {
-                label: "Profile 6",
-                data: [],
-                borderWidth: 2,
-                pointRadius: 0
-            },
-            {
-                label: "Profile 7",
-                data: [],
-                borderWidth: 2,
-                pointRadius: 0
-            },
-            {
-                label: "Profile 8",
-                data: [],
-                borderWidth: 2,
-                pointRadius: 0
-            },
-            {
-                label: "Profile 9",
-                data: [],
-                borderWidth: 2,
-                pointRadius: 0
-            }]
+                pointRadius: 2
+            }))
         },
 
         options: {
@@ -536,7 +489,7 @@ const gasResistanceChart = new Chart(
                 },
 
                 y: {
-                    type: 'linear',
+                    type: 'logarithmic',
                     title: {
                         display: true,
                         text: "Gas Resistance (kΩ)"
@@ -546,7 +499,7 @@ const gasResistanceChart = new Chart(
 
             plugins: {
                 legend: {
-                    display: false
+                    display: true
                 }
             }
         }
@@ -563,19 +516,14 @@ function updateGasResistanceChart(timestamp, profile, resistance) {
         ds.data = ds.data.filter(point => point.x >= cutoff);
     });
 
-    gasResistanceChart.data.datasets[profile].data.push({
-        x: now,
-        y: resistance / 1000.0 // Convert Ω to kΩ
-    });
-
-    const values = gasResistanceChart.data.datasets[profile].data.map(v => v.y);
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const padding = 2;
+    if (gasResistanceChart.data.datasets[profile]) {
+        gasResistanceChart.data.datasets[profile].data.push({
+            x: now,
+            y: resistance / 1000.0 // Convert Ω to kΩ
+        });
+    }
 
     gasResistanceChart.options.scales.x.min = cutoff;
     gasResistanceChart.options.scales.x.max = now;
-    gasResistanceChart.options.scales.y.min = Math.floor(min - padding);
-    gasResistanceChart.options.scales.y.max = Math.ceil(max + padding);
     gasResistanceChart.update("none");
 }
