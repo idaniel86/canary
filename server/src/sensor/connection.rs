@@ -65,6 +65,14 @@ pub async fn handle_connection(
             pipeline.process(sensor_reading);
         }
 
+        if let Some(noise) = reading.noise {
+            let sensor_reading = domain::SensorReading {
+                timestamp,
+                sensor: domain::Sensor::Noise { value: noise },
+            };
+            pipeline.process(sensor_reading);
+        }
+
         for proto::GasResistance {
             profile,
             resistance,

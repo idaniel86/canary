@@ -57,8 +57,15 @@ socket.onmessage = (event) => {
             );
             break;
 
-        case "Lux":
+        case "Lux": 
             updateLuxChart(
+                reading.timestamp,
+                reading.sensor.value
+            );
+            break;
+
+        case "Noise":
+            updateNoiseChart(
                 reading.timestamp,
                 reading.sensor.value
             );
@@ -526,4 +533,80 @@ function updateGasResistanceChart(timestamp, profile, resistance) {
     gasResistanceChart.options.scales.x.min = cutoff;
     gasResistanceChart.options.scales.x.max = now;
     gasResistanceChart.update("none");
+}
+
+const noiseChart = new Chart(
+    document.getElementById("noise-chart"),
+    {
+        type: "line",
+
+        data: {
+            datasets: [{
+                label: "Noise Level",
+                data: [],
+                borderWidth: 2,
+                pointRadius: 0
+            }]
+        },
+
+        options: {
+            animation: false,
+
+            parsing: false,
+
+            scales: {
+                x: {
+                    type: 'linear',
+                    min: Date.now() - 60_000,
+                    max: Date.now(),
+                    ticks: {
+                        stepSize: 5000,
+                        callback: (value) => `${Math.floor((Date.now() - value) / 1000)}s`
+                    },
+                    title: {
+                        display: true,
+                        text: 'Seconds ago'
+                    }
+                },
+
+                y: {
+                    type: 'logarithmic',
+                    title: {
+                        display: true,
+                        text: "Noise Level (dB)"
+                    },
+                }
+            },
+
+            plugins: {
+                legend: {
+                    display: false
+                }
+            }
+        }
+    }
+);
+
+function updateNoiseChart(timestamp, value) {
+
+    const now = timestamp;
+    const cutoff = now - 60_000;
+    const dataset = noiseChart.data.datasets[0];
+    
+    dataset.data.push({
+        x: now,
+        y: value
+    });
+    dataset.data = dataset.data.filter(point => point.x >= cutoff);
+
+    const values = dataset.data.map(v => v.y);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const padding = 1;
+
+    noiseChart.options.scales.x.min = cutoff;
+    noiseChart.options.scales.x.max = now;
+    noiseChart.options.scales.y.min = Math.floor(min - padding);
+    noiseChart.options.scales.y.max = Math.ceil(max + padding);
+    noiseChart.update("none");
 }

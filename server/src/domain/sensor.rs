@@ -8,6 +8,7 @@ pub enum Sensor {
     GasResistance { profile: u32, resistance: u32 },
     CO2 { value: u32 },
     Lux { value: u32 },
+    Noise { value: f32 },
 }
 
 /// Represents a reading from a sensor, including the timestamp of the reading and the type of sensor data.
