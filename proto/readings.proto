@@ -17,7 +17,7 @@ message SensorReading {
     /// Light intensity in lux
     optional uint32 lux = 6;
     /// Noise level in decibels
-    optional uint32 noise = 7;
+    optional float noise = 7;
 }
 
 /// SensorReadings represents a collection of sensor readings, allowing for multiple readings to be stored together.

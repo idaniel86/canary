@@ -1,6 +1,6 @@
 use embassy_net::{Runner, StackResources};
 use embassy_stm32::{
-    Config, bind_interrupts, dma, eth, i2c, mode, peripherals, rcc, rng, time::Hertz,
+    Config, bind_interrupts, dma, eth, i2c, mode, peripherals, rcc, rng, sai, time::Hertz,
 };
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use static_cell::StaticCell;
@@ -21,6 +21,7 @@ bind_interrupts!(struct Irqs {
     GPDMA1_CHANNEL5 => dma::InterruptHandler<peripherals::GPDMA1_CH5>;
     ETH => eth::InterruptHandler;
     RNG => rng::InterruptHandler<peripherals::RNG>;
+    GPDMA1_CHANNEL1 => dma::InterruptHandler<peripherals::GPDMA1_CH1>;
 });
 
 /// A struct that holds the hardware peripherals used in the application
@@ -28,6 +29,7 @@ pub struct Hardware<'d> {
     pub i2c_bus: &'d I2cBus<'static>,
     pub net_stack: embassy_net::Stack<'d>,
     pub net_runner: Runner<'d, Ethernet>,
+    pub mic_sai: sai::Sai<'d, peripherals::SAI1, u32>,
 }
 
 impl<'d> Default for Hardware<'d> {
@@ -60,6 +62,16 @@ impl<'d> Default for Hardware<'d> {
         config.rcc.sys = rcc::Sysclk::PLL1_P;
         // Set voltage scale to Scale0 for maximum frequency
         config.rcc.voltage_scale = rcc::VoltageScale::Scale0;
+        // Use PLL2_P (12.288 MHz) as SAI1 clock source
+        config.rcc.pll2 = Some(rcc::Pll {
+            source: rcc::PllSource::HSE,
+            prediv: rcc::PllPreDiv::DIV5,   // 8 MHz / 5 = 1.6 MHz
+            mul: rcc::PllMul::MUL192,       // 1.6 MHz * 192 = 307.2 MHz
+            divp: Some(rcc::PllDiv::DIV25), // 307.2 MHz / 25 = 12.288 MHz (SAI kernel clock for 48 kHz audio)
+            divq: None,
+            divr: None,
+        });
+        config.rcc.mux.sai1sel = rcc::mux::Saisel::PLL2_P;
 
         let p = embassy_stm32::init(config);
 
@@ -112,10 +124,46 @@ impl<'d> Default for Hardware<'d> {
             seed,
         );
 
+        // Split the SAI1 peripheral into its sub-blocks for audio processing
+        let (subblock_a, _) = sai::split_subblocks(p.SAI1);
+
+        // Configure the SAI engine specifically to match the ICS-43434 I2S profile
+        let mut sai_config = sai::Config::default();
+        sai_config.mode = sai::Mode::Master; // STM32 drives SCK and WS line
+        sai_config.tx_rx = sai::TxRx::Receiver; // We only need to receive audio data
+        sai_config.protocol = sai::Protocol::Free; // Customize the frame layout manually
+        sai_config.data_size = sai::DataSize::Data24; // 24 bits of active audio payload
+        sai_config.slot_size = sai::SlotSize::Channel32; // Stretched into a 32-bit timeline slot
+        sai_config.bit_order = sai::BitOrder::MsbFirst; // Standard I2S bit ordering
+        sai_config.frame_length = 64; // 2 slots * 32-bit Channel32 width
+        sai_config.frame_sync_active_level_length = sai::word::U7(32); // half the frame, per I2S WS duty cycle
+        sai_config.slot_enable = 0b01; // Enable only left channel (slot 0) L/R tied to GND on ICS-43434, so we only need to read one channel
+
+        // Define standard I2S Philips Frame Synchronization (WS) properties
+        sai_config.frame_sync_definition = sai::FrameSyncDefinition::ChannelIdentification;
+        sai_config.frame_sync_polarity = sai::FrameSyncPolarity::ActiveLow;
+        sai_config.frame_sync_offset = sai::FrameSyncOffset::BeforeFirstBit; // Shifts bits into true I2S alignment
+        sai_config.clock_strobe = sai::ClockStrobe::Rising; // ICS-43434 shifts data out on SCK falling edge; sample on the opposite edge
+
+        static DMA_BUF: StaticCell<[u32; 1024]> = StaticCell::new();
+        let dma_buf = DMA_BUF.init([0u32; 1024]);
+
+        let mic_sai = sai::Sai::new_asynchronous(
+            subblock_a,
+            p.PE5,
+            p.PE6,
+            p.PE4,
+            p.GPDMA1_CH1,
+            dma_buf,
+            Irqs,
+            sai_config,
+        );
+
         Hardware {
             i2c_bus,
             net_stack,
             net_runner,
+            mic_sai,
         }
     }
 }

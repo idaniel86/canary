@@ -20,6 +20,7 @@ use opt3001;
 mod hardware;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use hardware::{Ethernet, Hardware, I2cBus};
+mod ics43434;
 
 mod proto {
     #![allow(clippy::all)]
@@ -44,6 +45,7 @@ async fn main(spawner: Spawner) {
         i2c_bus,
         net_stack,
         net_runner,
+        mic_sai,
     } = Hardware::default();
 
     info!("Hello World!");
@@ -60,6 +62,8 @@ async fn main(spawner: Spawner) {
     spawner.spawn(bme688_task(&i2c_bus, sensor_sender.clone()).unwrap());
     spawner.spawn(scd41_task(&i2c_bus, sensor_sender.clone()).unwrap());
     spawner.spawn(net_task(net_runner).unwrap());
+ 
+    spawner.spawn(ics_43434_task(mic_sai, sensor_sender.clone()).unwrap());
 
     // Ensure DHCP configuration is up before trying connect
     net_stack.wait_config_up().await;
@@ -161,19 +165,20 @@ async fn bme688_task(
         .unwrap();
 
     let duration = (embassy_time::Duration::from_micros(duration_us as u64)
-        + embassy_time::Duration::from_millis(280)) * 3;
+        + embassy_time::Duration::from_millis(280))
+        * 3;
 
     loop {
         Timer::after(duration).await;
-        
+
         if let Ok(measurements) = sensor
             .get_measurements()
             .await
             .map_err(|e| error!("Error reading BME688 measurements: {:?}", e))
         {
             for measurement in measurements.iter() {
-                let mut reading = readings::SensorReading::default()
-                    .init_pressure(measurement.pressure as u32);
+                let mut reading =
+                    readings::SensorReading::default().init_pressure(measurement.pressure as u32);
                 let _ = reading.gas_resistance.push(readings::GasResistance {
                     profile: measurement.gas_meas_index as u32,
                     resistance: measurement.gas_resistance as u32,
@@ -270,6 +275,38 @@ async fn tcp_client_task(
                 );
                 Timer::after(embassy_time::Duration::from_secs(5)).await;
                 continue;
+            }
+        }
+    }
+}
+
+#[embassy_executor::task]
+async fn ics_43434_task(
+    mut mic_sai: embassy_stm32::sai::Sai<'static, embassy_stm32::peripherals::SAI1, u32>,
+    sender: DynamicSender<'static, readings::SensorReading>,
+) {
+    let mut ics_43434 = ics43434::Ics43434::new();
+    let mut raw_audio_frame = [1u32; 64]; // Buffer to hold raw audio samples
+
+    const SAMPLE_RATE: u32 = 48_000;
+
+    let mut sample_count = 0;
+
+    loop {
+        if let Err(e) = mic_sai.read(&mut raw_audio_frame).await {
+            error!("Error reading from ICS-43434 microphone: {:?}", e);
+            continue;
+        }
+
+        for &raw_sample in raw_audio_frame.iter() {
+            ics_43434.process(raw_sample);
+
+            sample_count += 1;
+            if sample_count >= SAMPLE_RATE {
+                sample_count = 0;
+
+                let reading = readings::SensorReading::default().init_noise(ics_43434.get_spl());
+                sender.send(reading).await;
             }
         }
     }
