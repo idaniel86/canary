@@ -37,12 +37,15 @@ impl QualityScore {
     /// Affects alertness/eye strain, but easiest for occupants to compensate for (blinds, desk lamps).
     const ILLUMINATION_WEIGHT: f32 = 0.1;
 
-    const CO2: [(f32, f32); 5] = [
-        (600.0, 100.0),
+    const CO2: [(f32, f32); 8] = [
+        (400.0, 100.0),
+        (600.0, 95.0),
         (800.0, 90.0),
-        (1000.0, 60.0),
-        (1500.0, 25.0),
-        (2500.0, 0.0),
+        (1000.0, 80.0),
+        (1400.0, 60.0),
+        (2000.0, 30.0),
+        (3000.0, 10.0),
+        (5000.0, 0.0),
     ];
 
     const TEMPERATURE: [(f32, f32); 6] = [
