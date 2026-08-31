@@ -292,6 +292,10 @@ async fn ics_43434_task(
 
     let mut sample_count = 0;
 
+    mic_sai.start().unwrap_or_else(|e| {
+        error!("Failed to start SAI interface: {:?}", e);
+    });
+
     loop {
         if let Err(e) = mic_sai.read(&mut raw_audio_frame).await {
             error!("Error reading from ICS-43434 microphone: {:?}", e);
