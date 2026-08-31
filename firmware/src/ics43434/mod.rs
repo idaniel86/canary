@@ -25,7 +25,7 @@ impl Ics43434 {
     const REFERENCE_SPL: f32 = 94.0; // Reference SPL value in dB for the ICS43434 microphone.
 
     /// Creates a new instance of the Ics43434 microphone interface with A-weighting and time-weighting filters.
-    /// 
+    ///
     /// # Returns
     /// * `Self` - A new instance of the Ics43434 microphone
     pub fn new() -> Self {
@@ -61,7 +61,7 @@ impl Ics43434 {
     }
 
     /// Returns the current Sound Pressure Level (SPL) in decibels (dB).
-    /// 
+    ///
     /// # Returns
     /// * `f32` - The calculated SPL value in dB.
     pub fn get_spl(&self) -> f32 {

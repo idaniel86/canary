@@ -1,4 +1,4 @@
-use biquad::{DirectForm2Transposed, Coefficients, Biquad};
+use biquad::{Biquad, Coefficients, DirectForm2Transposed};
 
 use super::Filter;
 
@@ -34,9 +34,8 @@ const COEFFS_4: Coefficients<f32> = Coefficients {
     a2: 0.9938675313,
 };
 
-
 /// Represents an A-weighting filter that applies a series of biquad filters to audio samples.
-/// 
+///
 /// The samples are sampled at 48 kHz, and the filter is designed to approximate the A-weighting curve used in sound level measurements.
 pub struct AWeighting {
     filter1: DirectForm2Transposed<f32>,
@@ -47,7 +46,7 @@ pub struct AWeighting {
 
 impl AWeighting {
     /// Creates a new instance of the AWeighting filter with the predefined coefficients.
-    /// 
+    ///
     /// # Returns
     /// * `Self` - A new instance of the AWeighting filter.
     pub const fn new() -> Self {
@@ -58,8 +57,6 @@ impl AWeighting {
             filter4: DirectForm2Transposed::new(COEFFS_4),
         }
     }
-
-
 }
 
 impl Filter for AWeighting {
@@ -77,6 +74,5 @@ impl Filter for AWeighting {
         self.filter2.reset_state();
         self.filter3.reset_state();
         self.filter4.reset_state();
-    }    
+    }
 }
-
