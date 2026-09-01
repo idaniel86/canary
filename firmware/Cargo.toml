@@ -29,3 +29,4 @@ libm = "0.2.16"
 
 [build-dependencies]
 micropb-gen = "0.6"
+bindgen = "0.72.1"

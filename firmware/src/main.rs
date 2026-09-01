@@ -31,6 +31,15 @@ mod proto {
     include!(concat!(env!("OUT_DIR"), "/proto.rs"));
 }
 
+mod bindings {
+    #![allow(clippy::all)]
+    #![allow(nonstandard_style, unused, irrefutable_let_patterns)]
+    #![allow(non_camel_case_types)]
+    #![allow(non_snake_case)]
+    #![allow(non_upper_case_globals)]
+    include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+}
+
 use proto::scores_ as scores;
 
 impl From<quality::QualityScore> for scores::QualityScore {

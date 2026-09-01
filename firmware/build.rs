@@ -20,6 +20,21 @@ fn main() {
         )
         .unwrap();
 
+    let bindings = bindgen::Builder::default()
+        .headers([
+            "../vendor/bsec2/src/inc/bsec_datatypes.h",
+            "../vendor/bsec2/src/inc/bsec_interface.h",
+        ])
+        .use_core()
+        .generate()
+        .unwrap();
+
+    bindings
+        .write_to_file(std::env::var("OUT_DIR").unwrap() + "/bindings.rs")
+        .unwrap();
+
+    println!("cargo:rustc-link-search=native=vendor/bsec2/src/cortex-m33/fpv5-sp-d16-hard");
+    println!("cargo:rustc-link-lib=static=algobsec");
     println!("cargo:rerun-if-changed=proto");
     println!("cargo:rustc-link-arg-bins=--nmagic");
     println!("cargo:rustc-link-arg-bins=-Tlink.x");
