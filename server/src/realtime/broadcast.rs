@@ -5,7 +5,7 @@ use tokio::sync::broadcast;
 #[derive(Clone)]
 pub struct EventBus {
     // The sender is used to broadcast events to all subscribers.
-    pub sender: broadcast::Sender<domain::SensorReading>,
+    pub sender: broadcast::Sender<domain::QualityScore>,
 }
 
 impl EventBus {
@@ -25,17 +25,17 @@ impl EventBus {
     /// Publishes a new event to all subscribers.
     ///
     /// # Arguments
-    /// * `reading` - The sensor reading event to be broadcasted.
-    pub fn publish(&self, reading: domain::SensorReading) {
-        println!("Broadcasting event: {:?}", reading);
-        let _ = self.sender.send(reading);
+    /// * `score` - The quality score event to be broadcasted.
+    pub fn publish(&self, score: domain::QualityScore) {
+        println!("Broadcasting event: {:?}", score);
+        let _ = self.sender.send(score);
     }
 
     /// Subscribes to the event bus, returning a receiver that can be used to receive events.
     ///
     /// # Returns
-    /// * `broadcast::Receiver<domain::SensorReading>` - A receiver that can be used to receive events from the event bus.
-    pub fn subscribe(&self) -> broadcast::Receiver<domain::SensorReading> {
+    /// * `broadcast::Receiver<domain::QualityScore>` - A receiver that can be used to receive events from the event bus.
+    pub fn subscribe(&self) -> broadcast::Receiver<domain::QualityScore> {
         self.sender.subscribe()
     }
 }

@@ -15,10 +15,11 @@ fn main() {
 
     generator
         .compile_protos(
-            &["readings.proto"],
-            std::env::var("OUT_DIR").unwrap() + "/readings.rs",
+            &["readings.proto", "scores.proto"],
+            std::env::var("OUT_DIR").unwrap() + "/proto.rs",
         )
         .unwrap();
+
     println!("cargo:rerun-if-changed=proto");
     println!("cargo:rustc-link-arg-bins=--nmagic");
     println!("cargo:rustc-link-arg-bins=-Tlink.x");

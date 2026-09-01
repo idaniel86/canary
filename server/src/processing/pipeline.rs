@@ -1,4 +1,4 @@
-use crate::domain::SensorReading;
+use crate::domain::QualityScore;
 use crate::realtime::EventBus;
 
 /// A processing pipeline that handles incoming sensor readings and publishes them to the event bus.
@@ -23,8 +23,8 @@ impl Pipeline {
     /// Processes an incoming sensor reading and publishes it to the event bus.
     ///
     /// # Arguments
-    /// * `reading` - The sensor reading to be processed.
-    pub fn process(&self, reading: SensorReading) {
-        self.event_bus.publish(reading);
+    /// * `score` - The quality score to be processed.
+    pub fn process(&self, score: QualityScore) {
+        self.event_bus.publish(score);
     }
 }

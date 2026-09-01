@@ -28,10 +28,37 @@ mod quality;
 mod proto {
     #![allow(clippy::all)]
     #![allow(nonstandard_style, unused, irrefutable_let_patterns)]
-    include!(concat!(env!("OUT_DIR"), "/readings.rs"));
+    include!(concat!(env!("OUT_DIR"), "/proto.rs"));
 }
 
-use proto::readings_ as readings;
+use proto::scores_ as scores;
+
+impl From<quality::QualityScore> for scores::QualityScore {
+    fn from(qs: quality::QualityScore) -> Self {
+        scores::QualityScore::default()
+            .init_score(qs.score)
+            .init_co2(scores::SubScore {
+                score: qs.co2.score,
+                measurement: qs.co2.measurement,
+            })
+            .init_temperature(scores::SubScore {
+                score: qs.temperature.score,
+                measurement: qs.temperature.measurement,
+            })
+            .init_humidity(scores::SubScore {
+                score: qs.humidity.score,
+                measurement: qs.humidity.measurement,
+            })
+            .init_illuminance(scores::SubScore {
+                score: qs.illuminance.score,
+                measurement: qs.illuminance.measurement,
+            })
+            .init_noise(scores::SubScore {
+                score: qs.noise.score,
+                measurement: qs.noise.measurement,
+            })
+    }
+}
 
 struct Delay;
 
@@ -53,24 +80,23 @@ async fn main(spawner: Spawner) {
 
     info!("Hello World!");
 
-    static SENSOR_CHANNEL: static_cell::StaticCell<
-        Channel<NoopRawMutex, readings::SensorReading, 1>,
-    > = static_cell::StaticCell::new();
-    let sensor_channel = SENSOR_CHANNEL.init(Channel::new());
-    let sensor_sender = sensor_channel.dyn_sender();
-    let sensor_receiver = sensor_channel.dyn_receiver();
+    static SCORES_CHANNEL: static_cell::StaticCell<Channel<NoopRawMutex, scores::QualityScore, 1>> =
+        static_cell::StaticCell::new();
+    let scores_channel = SCORES_CHANNEL.init(Channel::new());
+    let scores_sender = scores_channel.dyn_sender();
+    let scores_receiver = scores_channel.dyn_receiver();
 
     static QUALITY_SCORE: static_cell::StaticCell<Mutex<NoopRawMutex, quality::QualityScore>> =
         static_cell::StaticCell::new();
     let quality_score = QUALITY_SCORE.init(Mutex::new(quality::QualityScore::new()));
 
     // Spawn tasks
-    spawner.spawn(opt3001_task(&i2c_bus, sensor_sender.clone(), quality_score).unwrap());
-    spawner.spawn(bme688_task(&i2c_bus, sensor_sender.clone()).unwrap());
-    spawner.spawn(scd41_task(&i2c_bus, sensor_sender.clone(), quality_score).unwrap());
+    spawner.spawn(opt3001_task(&i2c_bus, quality_score).unwrap());
+    spawner.spawn(bme688_task(&i2c_bus).unwrap());
+    spawner.spawn(scd41_task(&i2c_bus, quality_score).unwrap());
     spawner.spawn(net_task(net_runner).unwrap());
-    spawner.spawn(ics_43434_task(mic_sai, sensor_sender.clone(), quality_score).unwrap());
-    spawner.spawn(quality_score_task(quality_score).unwrap());
+    spawner.spawn(ics_43434_task(mic_sai, quality_score).unwrap());
+    spawner.spawn(quality_score_task(quality_score, scores_sender).unwrap());
 
     // Ensure DHCP configuration is up before trying connect
     net_stack.wait_config_up().await;
@@ -91,7 +117,7 @@ async fn main(spawner: Spawner) {
     let server_address = SERVER_ADDRESS
         .and_then(|server_address| core::net::SocketAddrV4::from_str(server_address).ok());
     if let Some(server_address) = server_address {
-        spawner.spawn(tcp_client_task(socket, server_address, sensor_receiver).unwrap());
+        spawner.spawn(tcp_client_task(socket, server_address, scores_receiver).unwrap());
     } else {
         error!("SERVER_ADDRESS environment variable is not set or invalid");
     }
@@ -105,11 +131,10 @@ async fn main(spawner: Spawner) {
 #[embassy_executor::task]
 async fn opt3001_task(
     i2c_bus: &'static I2cBus<'static>,
-    sender: DynamicSender<'static, readings::SensorReading>,
     quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>,
 ) {
     // Tau of 5.0 seconds, initial output 0.0
-    let mut lux_filter = filters::LowPassFilter::new(5.0, None);
+    let mut illuminance_filter = filters::LowPassFilter::new(5.0, None);
 
     let mut sensor =
         opt3001::Opt3001::new(I2cDevice::new(&i2c_bus), opt3001::SlaveAddress::default());
@@ -128,12 +153,9 @@ async fn opt3001_task(
                     .await
                     .map_err(|e| error!("Error reading light intensity: {:?}", e))
                 {
-                    let _filtered_lux = lux_filter.process(lux as f32);
+                    let filtered = illuminance_filter.process(lux as f32);
                     let mut lock = quality_score.lock().await;
-                    lock.set_illumination(lux as f32);
-
-                    let reading = readings::SensorReading::default().init_lux(lux as u32);
-                    let _ = sender.try_send(reading);
+                    lock.set_illuminance(filtered);
                 }
             }
         }
@@ -141,10 +163,7 @@ async fn opt3001_task(
 }
 
 #[embassy_executor::task]
-async fn bme688_task(
-    i2c_bus: &'static I2cBus<'static>,
-    sender: DynamicSender<'static, readings::SensorReading>,
-) {
+async fn bme688_task(i2c_bus: &'static I2cBus<'static>) {
     let mut sensor = bme688::Bme688::new(
         I2cDevice::new(&i2c_bus),
         bme688::SlaveAddress::default(),
@@ -195,15 +214,7 @@ async fn bme688_task(
             .await
             .map_err(|e| error!("Error reading BME688 measurements: {:?}", e))
         {
-            for measurement in measurements.iter() {
-                let mut reading =
-                    readings::SensorReading::default().init_pressure(measurement.pressure as u32);
-                let _ = reading.gas_resistance.push(readings::GasResistance {
-                    profile: measurement.gas_meas_index as u32,
-                    resistance: measurement.gas_resistance as u32,
-                });
-                let _ = sender.try_send(reading);
-            }
+            for _measurement in measurements.iter() {}
         }
     }
 }
@@ -211,7 +222,6 @@ async fn bme688_task(
 #[embassy_executor::task]
 async fn scd41_task(
     i2c_bus: &'static I2cBus<'static>,
-    sender: DynamicSender<'static, readings::SensorReading>,
     quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>,
 ) {
     let mut co2_filter = filters::LowPassFilter::new(30.0, None);
@@ -252,12 +262,6 @@ async fn scd41_task(
                     lock.set_co2(co2_filtered);
                     lock.set_temperature(temperature_filtered);
                     lock.set_humidity(humidity_filtered);
-
-                    let reading = readings::SensorReading::default()
-                        .init_co2(measurement.co2 as u32)
-                        .init_temperature(measurement.temperature)
-                        .init_humidity(measurement.humidity);
-                    let _ = sender.try_send(reading);
                 }
             }
         }
@@ -273,11 +277,11 @@ async fn net_task(mut runner: embassy_net::Runner<'static, Ethernet>) -> ! {
 async fn tcp_client_task(
     mut socket: embassy_net::tcp::TcpSocket<'static>,
     remote_endpoint: core::net::SocketAddrV4,
-    receiver: DynamicReceiver<'static, readings::SensorReading>,
+    receiver: DynamicReceiver<'static, scores::QualityScore>,
 ) -> ! {
     let ip_address = embassy_net::Ipv4Address::from(*remote_endpoint.ip());
     let port = remote_endpoint.port();
-    const CAPACITY: usize = 4 + micropb::size::max_encoded_size::<readings::SensorReading>();
+    const CAPACITY: usize = 4 + micropb::size::max_encoded_size::<scores::QualityScore>();
 
     loop {
         match socket.connect((ip_address, port)).await {
@@ -315,7 +319,6 @@ async fn tcp_client_task(
 #[embassy_executor::task]
 async fn ics_43434_task(
     mut mic_sai: embassy_stm32::sai::Sai<'static, embassy_stm32::peripherals::SAI1, u32>,
-    sender: DynamicSender<'static, readings::SensorReading>,
     quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>,
 ) {
     let mut spl_filter = filters::LowPassFilter::new(10.0, None); // Tau of 10.0 seconds for SPL filtering
@@ -347,20 +350,23 @@ async fn ics_43434_task(
                 let spl_filtered = spl_filter.process(spl);
                 let mut lock = quality_score.lock().await;
                 lock.set_noise(spl_filtered);
-
-                let reading = readings::SensorReading::default().init_noise(spl);
-                let _ = sender.try_send(reading);
             }
         }
     }
 }
 
 #[embassy_executor::task]
-async fn quality_score_task(quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>) {
+async fn quality_score_task(
+    quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>,
+    sender: DynamicSender<'static, scores::QualityScore>,
+) {
     loop {
         Timer::after(embassy_time::Duration::from_secs(10)).await;
         let mut lock = quality_score.lock().await;
-        let score = lock.calculate_score();
-        info!("Quality Score: {}, Subscores: {:?}", score, *lock);
+        lock.calculate_score();
+        info!("Quality Score: {:?}", *lock);
+
+        // Send the updated quality score to the TCP client task
+        let _ = sender.try_send((*lock).into());
     }
 }

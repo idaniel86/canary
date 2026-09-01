@@ -3,36 +3,61 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/date-fns" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns" defer></script>
-    <script src="/static/app.js" defer></script>
+    <title>Canary Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/static/app.js" defer></script>
 </head>
-<body>
-    <div class="grid grid-cols-2 gap-4">
-        <div>
-            <canvas id="temperature-chart"></canvas>
-        </div>
-        <div>
-            <canvas id="humidity-chart"></canvas>
-        </div>
-        <div>
-            <canvas id="pressure-chart"></canvas>
-        </div>
-        <div>
-            <canvas id="lux-chart"></canvas>
-        </div>
-        <div>
-            <canvas id="co2-chart"></canvas>
-        </div>
-        <div>
-            <canvas id="gas-resistance-chart"></canvas>
-        </div>
-        <div>
-            <canvas id="noise-chart"></canvas>
-        </div>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans">
+    <div class="max-w-6xl mx-auto px-4 py-8">
+
+        <header class="flex items-center justify-between mb-8">
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight text-white">Canary</h1>
+                <p class="text-sm text-slate-400">Live environmental quality monitor</p>
+            </div>
+            <div class="flex items-center gap-2 text-sm text-slate-400">
+                <span id="connection-dot" class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+                <span id="connection-label">Connecting…</span>
+            </div>
+        </header>
+
+        <!-- Overall score -->
+        <section class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-8 flex items-center gap-6">
+            <div class="relative w-32 h-32 shrink-0">
+                <canvas id="overall-doughnut"></canvas>
+                <div class="absolute inset-0 flex flex-col items-center justify-center">
+                    <span id="overall-score-value" class="text-3xl font-bold text-white">--</span>
+                    <span class="text-xs text-slate-400">/ 100</span>
+                </div>
+            </div>
+            <div>
+                <h2 class="text-lg font-semibold text-white">Overall Quality</h2>
+                <p id="overall-score-label" class="text-sm text-slate-400">Waiting for readings…</p>
+            </div>
+        </section>
+
+        <!-- Scored sensors -->
+        <section id="score-cards" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+            <!-- cards injected by app.js -->
+        </section>
+
     </div>
+
+    <template id="sensor-card-template">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col items-center text-center gap-2">
+            <div class="sensor-icon w-8 h-8 text-slate-300"></div>
+            <div class="relative w-20 h-20">
+                <canvas class="sensor-doughnut"></canvas>
+                <div class="absolute inset-0 flex items-center justify-center">
+                    <span class="sensor-score-value text-lg font-bold text-white">--</span>
+                </div>
+            </div>
+            <div>
+                <p class="sensor-name text-sm font-medium text-slate-200"></p>
+                <p class="sensor-value text-xs text-slate-400">--</p>
+            </div>
+        </div>
+    </template>
 </body>
 </html>
