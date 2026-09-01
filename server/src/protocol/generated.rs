@@ -1,5 +1,5 @@
 pub mod proto {
     #![allow(clippy::all)]
     #![allow(nonstandard_style, unused, irrefutable_let_patterns)]
-    include!(concat!(env!("OUT_DIR"), "/readings.rs"));
+    include!(concat!(env!("OUT_DIR"), "/scores.rs"));
 }
