@@ -1,0 +1,3 @@
+[submodule "vendor/bsec2"]
+	path = vendor/bsec2
+	url = git@github.com:boschsensortec/Bosch-BSEC2-Library.git
