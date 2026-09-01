@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package scores;
+
+message SubScore {
+    /// The subscore value, typically ranging from 0 to 100, representing the quality of a specific environmental factor.
+    float score = 1;
+    /// The raw measurement value corresponding to the subscore.
+    float measurement = 2;
+}
+
+message QualityScore {
+    /// The overall quality score, which is a weighted combination of various environmental factors.
+    float score = 1;
+    /// The subscores for CO2 concentration represented as a SubScore message.s
+    SubScore co2 = 2;
+    /// The subscores for temperature represented as a SubScore message.
+    SubScore temperature = 3;
+    /// The subscores for humidity represented as a SubScore message.
+    SubScore humidity = 4;
+    /// The subscores for illuminance represented as a SubScore message.
+    SubScore illuminance = 5;
+    /// The subscores for noise represented as a SubScore message.
+    SubScore noise = 6;
+}
