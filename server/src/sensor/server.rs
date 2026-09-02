@@ -1,6 +1,7 @@
 use super::connection::handle_connection;
 use crate::processing::Pipeline;
 use tokio::net::TcpListener;
+use tracing::{error, info};
 
 /// Starts the sensor server, accepting incoming TCP connections and processing sensor readings.
 ///
@@ -13,13 +14,13 @@ use tokio::net::TcpListener;
 pub async fn run(listener: TcpListener, pipeline: Pipeline) -> Result<(), std::io::Error> {
     loop {
         let (socket, addr) = listener.accept().await?;
-        println!("New connection from: {}", addr);
+        info!(address = %addr, "New connection accepted from sensor");
 
         // Handle the connection in a separate task
         let pipeline = pipeline.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_connection(socket, pipeline).await {
-                eprintln!("Error handling connection from {}: {}", addr, e);
+                error!(error = %e, address = %addr, "Error handling connection from sensor");
             }
         });
     }

@@ -4,6 +4,8 @@ pub struct Config {
     pub sensor: SensorConfig,
     /// The web server configuration, including the HTTP address.
     pub web: WebConfig,
+    /// The logging configuration, including the log level.
+    pub logging: LoggingConfig,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -17,6 +19,11 @@ pub struct SensorConfig {
 pub struct WebConfig {
     /// The address on which the HTTP server will listen for incoming requests.
     pub address: std::net::SocketAddr,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct LoggingConfig {
+    pub level: String,
 }
 
 impl Config {

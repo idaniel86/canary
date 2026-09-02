@@ -4,3 +4,6 @@ capacity = "1024"
 
 [web]
 address = "0.0.0.0:9001"
+
+[logging]
+level = "info"
