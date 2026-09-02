@@ -7,6 +7,7 @@ use axum::{
     response::IntoResponse,
 };
 use serde_json;
+use tracing::{info, error};
 
 /// Handles WebSocket connections and sends sensor readings to connected clients.
 ///
@@ -28,7 +29,7 @@ pub async fn websocket_handler(
 /// * `socket` - The WebSocket connection to the client
 /// * `state` - The application state containing the event bus
 async fn handle_socket(mut socket: WebSocket, state: AppState) {
-    println!("New WebSocket connection established.");
+    info!("New WebSocket connection established.");
 
     let mut rx = state.events.subscribe();
 
@@ -36,13 +37,13 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         let json = match serde_json::to_string(&reading) {
             Ok(json) => json,
             Err(e) => {
-                eprintln!("Failed to serialize sensor reading: {}", e);
+                error!(error = %e, "Failed to serialize sensor reading");
                 continue;
             }
         };
 
         if let Err(e) = socket.send(Message::Text(json.into())).await {
-            eprintln!("Failed to send message over WebSocket: {}", e);
+            error!(error = %e, "Failed to send message over WebSocket");
             break;
         }
     }

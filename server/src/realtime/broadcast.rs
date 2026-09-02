@@ -1,5 +1,6 @@
 use crate::domain;
 use tokio::sync::broadcast;
+use tracing::info;
 
 /// EventBus is a simple event bus that allows broadcasting events to multiple subscribers.
 #[derive(Clone)]
@@ -27,7 +28,7 @@ impl EventBus {
     /// # Arguments
     /// * `score` - The quality score event to be broadcasted.
     pub fn publish(&self, score: domain::QualityScore) {
-        println!("Broadcasting event: {:?}", score);
+        info!(score = ?score, "Broadcasting event");
         let _ = self.sender.send(score);
     }
 
