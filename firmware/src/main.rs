@@ -367,6 +367,6 @@ async fn quality_score_task(
         info!("Quality Score: {:?}", *lock);
 
         // Send the updated quality score to the TCP client task
-        let _ = sender.try_send((*lock).into());
+        let _ = sender.try_send((*lock).clone().into());
     }
 }
