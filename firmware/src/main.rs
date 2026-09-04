@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(impl_trait_in_assoc_type)]
 
 use core::str::FromStr;
 
@@ -24,6 +25,7 @@ use hardware::{Ethernet, Hardware, I2cBus};
 mod filters;
 mod ics43434;
 mod quality;
+mod web;
 
 mod proto {
     #![allow(clippy::all)]
@@ -31,6 +33,7 @@ mod proto {
     include!(concat!(env!("OUT_DIR"), "/proto.rs"));
 }
 
+use picoserve::AppWithStateBuilder;
 use proto::scores_ as scores;
 
 impl From<quality::QualityScore> for scores::QualityScore {
@@ -39,23 +42,23 @@ impl From<quality::QualityScore> for scores::QualityScore {
             .init_score(qs.score)
             .init_co2(scores::SubScore {
                 score: qs.co2.score,
-                measurement: qs.co2.measurement,
+                measurement: qs.co2.value,
             })
             .init_temperature(scores::SubScore {
                 score: qs.temperature.score,
-                measurement: qs.temperature.measurement,
+                measurement: qs.temperature.value,
             })
             .init_humidity(scores::SubScore {
                 score: qs.humidity.score,
-                measurement: qs.humidity.measurement,
+                measurement: qs.humidity.value,
             })
             .init_illuminance(scores::SubScore {
                 score: qs.illuminance.score,
-                measurement: qs.illuminance.measurement,
+                measurement: qs.illuminance.value,
             })
             .init_noise(scores::SubScore {
                 score: qs.noise.score,
-                measurement: qs.noise.measurement,
+                measurement: qs.noise.value,
             })
     }
 }
@@ -90,12 +93,18 @@ async fn main(spawner: Spawner) {
         static_cell::StaticCell::new();
     let quality_score = QUALITY_SCORE.init(Mutex::new(quality::QualityScore::new()));
 
+    static QUALITY_SCORE_CONFIG: static_cell::StaticCell<
+        Mutex<NoopRawMutex, quality::QualityScoreConfig>,
+    > = static_cell::StaticCell::new();
+    let quality_score_config =
+        QUALITY_SCORE_CONFIG.init(Mutex::new(quality::QualityScoreConfig::default()));
+
     // Spawn tasks
-    spawner.spawn(opt3001_task(&i2c_bus, quality_score).unwrap());
+    spawner.spawn(opt3001_task(&i2c_bus, quality_score, quality_score_config).unwrap());
     spawner.spawn(bme688_task(&i2c_bus).unwrap());
-    spawner.spawn(scd41_task(&i2c_bus, quality_score).unwrap());
+    spawner.spawn(scd41_task(&i2c_bus, quality_score, quality_score_config).unwrap());
     spawner.spawn(net_task(net_runner).unwrap());
-    spawner.spawn(ics_43434_task(mic_sai, quality_score).unwrap());
+    spawner.spawn(ics_43434_task(mic_sai, quality_score, quality_score_config).unwrap());
     spawner.spawn(quality_score_task(quality_score, scores_sender).unwrap());
 
     // Ensure DHCP configuration is up before trying connect
@@ -122,6 +131,16 @@ async fn main(spawner: Spawner) {
         error!("SERVER_ADDRESS environment variable is not set or invalid");
     }
 
+    let app = picoserve::make_static!(picoserve::AppRouter<web::App>, web::App::new().build_app());
+    let app_state = picoserve::make_static!(
+        web::AppState,
+        web::AppState::new(quality_score, quality_score_config,)
+    );
+
+    for task_id in 0..WEB_TASK_POOL_SIZE {
+        spawner.spawn(web_task(task_id, net_stack, app, app_state).unwrap());
+    }
+
     loop {
         info!("Heartbeat...");
         Timer::after(embassy_time::Duration::from_secs(60)).await;
@@ -132,9 +151,11 @@ async fn main(spawner: Spawner) {
 async fn opt3001_task(
     i2c_bus: &'static I2cBus<'static>,
     quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>,
+    quality_score_config: &'static Mutex<NoopRawMutex, quality::QualityScoreConfig>,
 ) {
-    // Tau of 5.0 seconds, initial output 0.0
-    let mut illuminance_filter = filters::LowPassFilter::new(5.0, None);
+    let quality_score_config_lock = quality_score_config.lock().await;
+    let mut illuminance_filter = filters::LowPassFilter::new(quality_score_config_lock.illuminance.filter_tau_seconds, None);
+    drop(quality_score_config_lock);
 
     let mut sensor =
         opt3001::Opt3001::new(I2cDevice::new(&i2c_bus), opt3001::SlaveAddress::default());
@@ -148,14 +169,16 @@ async fn opt3001_task(
         Timer::after(embassy_time::Duration::from_millis(800)).await;
         if let Ok(status) = sensor.get_status().await {
             if status.is_conversion_ready {
-                if let Ok(lux) = sensor
+                if let Ok(illuminance) = sensor
                     .get_result()
                     .await
                     .map_err(|e| error!("Error reading light intensity: {:?}", e))
                 {
-                    let filtered = illuminance_filter.process(lux as f32);
-                    let mut lock = quality_score.lock().await;
-                    lock.set_illuminance(filtered);
+                    let illuminance = illuminance_filter.process(illuminance as f32);
+                    quality_score
+                        .lock()
+                        .await
+                        .update_illuminance(illuminance, &*quality_score_config.lock().await);
                 }
             }
         }
@@ -223,10 +246,13 @@ async fn bme688_task(i2c_bus: &'static I2cBus<'static>) {
 async fn scd41_task(
     i2c_bus: &'static I2cBus<'static>,
     quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>,
+    quality_score_config: &'static Mutex<NoopRawMutex, quality::QualityScoreConfig>,
 ) {
-    let mut co2_filter = filters::LowPassFilter::new(30.0, None);
-    let mut temperature_filter = filters::LowPassFilter::new(30.0, None);
-    let mut humidity_filter = filters::LowPassFilter::new(30.0, None);
+    let quality_score_config_lock = quality_score_config.lock().await;
+    let mut co2_filter = filters::LowPassFilter::new(quality_score_config_lock.co2.filter_tau_seconds, None);
+    let mut temperature_filter = filters::LowPassFilter::new(quality_score_config_lock.temperature.filter_tau_seconds, None);
+    let mut humidity_filter = filters::LowPassFilter::new(quality_score_config_lock.humidity.filter_tau_seconds, None);
+    drop(quality_score_config_lock);
 
     let mut sensor = scd4x::Scd4xAsync::new(I2cDevice::new(&i2c_bus), Delay);
     let _ = sensor.stop_periodic_measurement().await;
@@ -259,9 +285,10 @@ async fn scd41_task(
                     let temperature_filtered = temperature_filter.process(measurement.temperature);
                     let humidity_filtered = humidity_filter.process(measurement.humidity);
                     let mut lock = quality_score.lock().await;
-                    lock.set_co2(co2_filtered);
-                    lock.set_temperature(temperature_filtered);
-                    lock.set_humidity(humidity_filtered);
+                    let config_lock = quality_score_config.lock().await;
+                    lock.update_co2(co2_filtered, &config_lock);
+                    lock.update_temperature(temperature_filtered, &config_lock);
+                    lock.update_humidity(humidity_filtered, &config_lock);
                 }
             }
         }
@@ -320,8 +347,11 @@ async fn tcp_client_task(
 async fn ics_43434_task(
     mut mic_sai: embassy_stm32::sai::Sai<'static, embassy_stm32::peripherals::SAI1, u32>,
     quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>,
+    quality_score_config: &'static Mutex<NoopRawMutex, quality::QualityScoreConfig>,
 ) {
-    let mut spl_filter = filters::LowPassFilter::new(10.0, None); // Tau of 10.0 seconds for SPL filtering
+    let quality_score_config_lock = quality_score_config.lock().await;
+    let mut spl_filter = filters::LowPassFilter::new(quality_score_config_lock.noise.filter_tau_seconds, None);
+    drop(quality_score_config_lock);
 
     let mut ics_43434 = ics43434::Ics43434::new();
     let mut raw_audio_frame = [1u32; 1024]; // Buffer to hold raw audio samples
@@ -348,8 +378,10 @@ async fn ics_43434_task(
                 sample_count = 0;
                 let spl = ics_43434.get_spl();
                 let spl_filtered = spl_filter.process(spl);
-                let mut lock = quality_score.lock().await;
-                lock.set_noise(spl_filtered);
+                quality_score
+                    .lock()
+                    .await
+                    .update_noise(spl_filtered, &*quality_score_config.lock().await);
             }
         }
     }
@@ -362,11 +394,34 @@ async fn quality_score_task(
 ) {
     loop {
         Timer::after(embassy_time::Duration::from_secs(10)).await;
-        let mut lock = quality_score.lock().await;
-        lock.calculate_score();
-        info!("Quality Score: {:?}", *lock);
+        let lock = quality_score.lock().await;
+        let current_score = (*lock).clone();
+        drop(lock);
+        info!("Quality Score: {:?}", &current_score);
 
         // Send the updated quality score to the TCP client task
-        let _ = sender.try_send((*lock).into());
+        let _ = sender.try_send(current_score.into());
     }
+}
+
+static CONFIG: picoserve::Config = picoserve::Config::const_default().keep_connection_alive();
+
+const WEB_TASK_POOL_SIZE: usize = 1;
+
+#[embassy_executor::task(pool_size = WEB_TASK_POOL_SIZE)]
+async fn web_task(
+    task_id: usize,
+    stack: embassy_net::Stack<'static>,
+    app: &'static picoserve::AppRouter<web::App<'static>>,
+    state: &'static web::AppState<'static>,
+) {
+    let port = 80;
+    let mut tcp_rx_buffer = [0; 1024];
+    let mut tcp_tx_buffer = [0; 1024];
+    let mut http_buffer = [0; 2048];
+
+    picoserve::Server::new(&app.shared().with_state(state), &CONFIG, &mut http_buffer)
+        .listen_and_serve(task_id, stack, port, &mut tcp_rx_buffer, &mut tcp_tx_buffer)
+        .await
+        .into_never()
 }
