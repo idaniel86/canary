@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(impl_trait_in_assoc_type)]
 
 use core::str::FromStr;
 
@@ -24,6 +25,7 @@ use hardware::{Ethernet, Hardware, I2cBus};
 mod filters;
 mod ics43434;
 mod quality;
+mod web;
 
 mod proto {
     #![allow(clippy::all)]
@@ -31,6 +33,7 @@ mod proto {
     include!(concat!(env!("OUT_DIR"), "/proto.rs"));
 }
 
+use picoserve::AppWithStateBuilder;
 use proto::scores_ as scores;
 
 impl From<quality::QualityScore> for scores::QualityScore {
@@ -126,6 +129,16 @@ async fn main(spawner: Spawner) {
         spawner.spawn(tcp_client_task(socket, server_address, scores_receiver).unwrap());
     } else {
         error!("SERVER_ADDRESS environment variable is not set or invalid");
+    }
+
+    let app = picoserve::make_static!(picoserve::AppRouter<web::App>, web::App::new().build_app());
+    let app_state = picoserve::make_static!(
+        web::AppState,
+        web::AppState::new(quality_score, quality_score_config,)
+    );
+
+    for task_id in 0..WEB_TASK_POOL_SIZE {
+        spawner.spawn(web_task(task_id, net_stack, app, app_state).unwrap());
     }
 
     loop {
@@ -382,4 +395,26 @@ async fn quality_score_task(
         // Send the updated quality score to the TCP client task
         let _ = sender.try_send((*lock).clone().into());
     }
+}
+
+static CONFIG: picoserve::Config = picoserve::Config::const_default().keep_connection_alive();
+
+const WEB_TASK_POOL_SIZE: usize = 1;
+
+#[embassy_executor::task(pool_size = WEB_TASK_POOL_SIZE)]
+async fn web_task(
+    task_id: usize,
+    stack: embassy_net::Stack<'static>,
+    app: &'static picoserve::AppRouter<web::App<'static>>,
+    state: &'static web::AppState<'static>,
+) {
+    let port = 80;
+    let mut tcp_rx_buffer = [0; 1024];
+    let mut tcp_tx_buffer = [0; 1024];
+    let mut http_buffer = [0; 2048];
+
+    picoserve::Server::new(&app.shared().with_state(state), &CONFIG, &mut http_buffer)
+        .listen_and_serve(task_id, stack, port, &mut tcp_rx_buffer, &mut tcp_tx_buffer)
+        .await
+        .into_never()
 }
