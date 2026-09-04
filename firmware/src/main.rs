@@ -153,8 +153,9 @@ async fn opt3001_task(
     quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>,
     quality_score_config: &'static Mutex<NoopRawMutex, quality::QualityScoreConfig>,
 ) {
-    // Tau of 5.0 seconds, initial output 0.0
-    let mut illuminance_filter = filters::LowPassFilter::new(5.0, None);
+    let quality_score_config_lock = quality_score_config.lock().await;
+    let mut illuminance_filter = filters::LowPassFilter::new(quality_score_config_lock.illuminance.filter_tau_seconds, None);
+    drop(quality_score_config_lock);
 
     let mut sensor =
         opt3001::Opt3001::new(I2cDevice::new(&i2c_bus), opt3001::SlaveAddress::default());
@@ -247,9 +248,11 @@ async fn scd41_task(
     quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>,
     quality_score_config: &'static Mutex<NoopRawMutex, quality::QualityScoreConfig>,
 ) {
-    let mut co2_filter = filters::LowPassFilter::new(30.0, None);
-    let mut temperature_filter = filters::LowPassFilter::new(30.0, None);
-    let mut humidity_filter = filters::LowPassFilter::new(30.0, None);
+    let quality_score_config_lock = quality_score_config.lock().await;
+    let mut co2_filter = filters::LowPassFilter::new(quality_score_config_lock.co2.filter_tau_seconds, None);
+    let mut temperature_filter = filters::LowPassFilter::new(quality_score_config_lock.temperature.filter_tau_seconds, None);
+    let mut humidity_filter = filters::LowPassFilter::new(quality_score_config_lock.humidity.filter_tau_seconds, None);
+    drop(quality_score_config_lock);
 
     let mut sensor = scd4x::Scd4xAsync::new(I2cDevice::new(&i2c_bus), Delay);
     let _ = sensor.stop_periodic_measurement().await;
@@ -346,7 +349,9 @@ async fn ics_43434_task(
     quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>,
     quality_score_config: &'static Mutex<NoopRawMutex, quality::QualityScoreConfig>,
 ) {
-    let mut spl_filter = filters::LowPassFilter::new(10.0, None); // Tau of 10.0 seconds for SPL filtering
+    let quality_score_config_lock = quality_score_config.lock().await;
+    let mut spl_filter = filters::LowPassFilter::new(quality_score_config_lock.noise.filter_tau_seconds, None);
+    drop(quality_score_config_lock);
 
     let mut ics_43434 = ics43434::Ics43434::new();
     let mut raw_audio_frame = [1u32; 1024]; // Buffer to hold raw audio samples
@@ -390,10 +395,12 @@ async fn quality_score_task(
     loop {
         Timer::after(embassy_time::Duration::from_secs(10)).await;
         let lock = quality_score.lock().await;
-        info!("Quality Score: {:?}", *lock);
+        let current_score = (*lock).clone();
+        drop(lock);
+        info!("Quality Score: {:?}", &current_score);
 
         // Send the updated quality score to the TCP client task
-        let _ = sender.try_send((*lock).clone().into());
+        let _ = sender.try_send(current_score.into());
     }
 }
 
