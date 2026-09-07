@@ -1,4 +1,4 @@
-use defmt::{error, info};
+use defmt::error;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::Timer;
 use picoserve::{
