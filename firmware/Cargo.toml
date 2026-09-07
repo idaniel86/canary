@@ -28,6 +28,7 @@ biquad = "0.6.0"
 libm = "0.2.16"
 serde = { version = "1.0.229", default-features = false, features = ["derive"] }
 picoserve = { version = "0.20.0", features = ["embassy", "json"] }
+sequential-storage = { version = "8.0.1", features = ["postcard", "defmt"] }
 
 [build-dependencies]
 micropb-gen = "0.6"

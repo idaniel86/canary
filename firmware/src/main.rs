@@ -13,6 +13,7 @@ use embassy_sync::{
     blocking_mutex::raw::NoopRawMutex,
     channel::{Channel, DynamicReceiver, DynamicSender},
     mutex::Mutex,
+    signal,
 };
 use embassy_time::Timer;
 use embedded_io_async::Write;
@@ -25,6 +26,8 @@ use hardware::{Ethernet, Hardware, I2cBus};
 mod filters;
 mod ics43434;
 mod quality;
+mod storage;
+use storage::Storage;
 mod web;
 
 mod proto {
@@ -79,9 +82,22 @@ async fn main(spawner: Spawner) {
         net_stack,
         net_runner,
         mic_sai,
+        flash,
     } = Hardware::default();
 
     info!("Hello World!");
+
+    let mut storage = Storage::new(flash);
+    let score_config = storage
+        .get_score_config()
+        .await
+        .map_err(|e| error!("Failed to get score config: {:?}", e))
+        .unwrap()
+        .unwrap_or_default();
+
+    static STORAGE_SIGNAL: static_cell::StaticCell<embassy_sync::signal::Signal<NoopRawMutex, ()>> =
+        static_cell::StaticCell::new();
+    let storage_signal = STORAGE_SIGNAL.init(embassy_sync::signal::Signal::new());
 
     static SCORES_CHANNEL: static_cell::StaticCell<Channel<NoopRawMutex, scores::QualityScore, 1>> =
         static_cell::StaticCell::new();
@@ -96,8 +112,7 @@ async fn main(spawner: Spawner) {
     static QUALITY_SCORE_CONFIG: static_cell::StaticCell<
         Mutex<NoopRawMutex, quality::QualityScoreConfig>,
     > = static_cell::StaticCell::new();
-    let quality_score_config =
-        QUALITY_SCORE_CONFIG.init(Mutex::new(quality::QualityScoreConfig::default()));
+    let quality_score_config = QUALITY_SCORE_CONFIG.init(Mutex::new(score_config));
 
     // Spawn tasks
     spawner.spawn(opt3001_task(&i2c_bus, quality_score, quality_score_config).unwrap());
@@ -106,6 +121,7 @@ async fn main(spawner: Spawner) {
     spawner.spawn(net_task(net_runner).unwrap());
     spawner.spawn(ics_43434_task(mic_sai, quality_score, quality_score_config).unwrap());
     spawner.spawn(quality_score_task(quality_score, scores_sender).unwrap());
+    spawner.spawn(storage_task(storage, storage_signal, quality_score_config).unwrap());
 
     // Ensure DHCP configuration is up before trying connect
     net_stack.wait_config_up().await;
@@ -134,7 +150,7 @@ async fn main(spawner: Spawner) {
     let app = picoserve::make_static!(picoserve::AppRouter<web::App>, web::App::new().build_app());
     let app_state = picoserve::make_static!(
         web::AppState,
-        web::AppState::new(quality_score, quality_score_config,)
+        web::AppState::new(quality_score, quality_score_config, storage_signal)
     );
 
     for task_id in 0..WEB_TASK_POOL_SIZE {
@@ -154,7 +170,10 @@ async fn opt3001_task(
     quality_score_config: &'static Mutex<NoopRawMutex, quality::QualityScoreConfig>,
 ) {
     let quality_score_config_lock = quality_score_config.lock().await;
-    let mut illuminance_filter = filters::LowPassFilter::new(quality_score_config_lock.illuminance.filter_tau_seconds, None);
+    let mut illuminance_filter = filters::LowPassFilter::new(
+        quality_score_config_lock.illuminance.filter_tau_seconds,
+        None,
+    );
     drop(quality_score_config_lock);
 
     let mut sensor =
@@ -249,9 +268,14 @@ async fn scd41_task(
     quality_score_config: &'static Mutex<NoopRawMutex, quality::QualityScoreConfig>,
 ) {
     let quality_score_config_lock = quality_score_config.lock().await;
-    let mut co2_filter = filters::LowPassFilter::new(quality_score_config_lock.co2.filter_tau_seconds, None);
-    let mut temperature_filter = filters::LowPassFilter::new(quality_score_config_lock.temperature.filter_tau_seconds, None);
-    let mut humidity_filter = filters::LowPassFilter::new(quality_score_config_lock.humidity.filter_tau_seconds, None);
+    let mut co2_filter =
+        filters::LowPassFilter::new(quality_score_config_lock.co2.filter_tau_seconds, None);
+    let mut temperature_filter = filters::LowPassFilter::new(
+        quality_score_config_lock.temperature.filter_tau_seconds,
+        None,
+    );
+    let mut humidity_filter =
+        filters::LowPassFilter::new(quality_score_config_lock.humidity.filter_tau_seconds, None);
     drop(quality_score_config_lock);
 
     let mut sensor = scd4x::Scd4xAsync::new(I2cDevice::new(&i2c_bus), Delay);
@@ -350,7 +374,8 @@ async fn ics_43434_task(
     quality_score_config: &'static Mutex<NoopRawMutex, quality::QualityScoreConfig>,
 ) {
     let quality_score_config_lock = quality_score_config.lock().await;
-    let mut spl_filter = filters::LowPassFilter::new(quality_score_config_lock.noise.filter_tau_seconds, None);
+    let mut spl_filter =
+        filters::LowPassFilter::new(quality_score_config_lock.noise.filter_tau_seconds, None);
     drop(quality_score_config_lock);
 
     let mut ics_43434 = ics43434::Ics43434::new();
@@ -418,10 +443,25 @@ async fn web_task(
     let port = 80;
     let mut tcp_rx_buffer = [0; 1024];
     let mut tcp_tx_buffer = [0; 1024];
-    let mut http_buffer = [0; 2048];
+    let mut http_buffer = [0; 4096];
 
     picoserve::Server::new(&app.shared().with_state(state), &CONFIG, &mut http_buffer)
         .listen_and_serve(task_id, stack, port, &mut tcp_rx_buffer, &mut tcp_tx_buffer)
         .await
         .into_never()
+}
+
+#[embassy_executor::task]
+async fn storage_task(
+    mut storage: Storage<'static>,
+    signal: &'static signal::Signal<NoopRawMutex, ()>,
+    quality_score_config: &'static Mutex<NoopRawMutex, quality::QualityScoreConfig>,
+) {
+    loop {
+        let _ = signal.wait().await;
+        let config = quality_score_config.lock().await;
+        if let Err(e) = storage.set_score_config(&*config).await {
+            error!("Failed to set score config: {:?}", e);
+        }
+    }
 }
