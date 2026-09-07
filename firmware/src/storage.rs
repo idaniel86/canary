@@ -20,10 +20,10 @@ pub struct Storage<'d> {
 
 impl<'d> Storage<'d> {
     /// Creates a new instance of the storage with the given flash memory.
-    /// 
+    ///
     /// # Arguments
     /// * `flash` - The flash memory to be used for storage.
-    /// 
+    ///
     /// # Returns
     /// * `Self` - A new instance of the storage.
     pub fn new(flash: Flash<'d>) -> Self {
