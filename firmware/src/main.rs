@@ -2,8 +2,6 @@
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
 
-use core::str::FromStr;
-
 use {defmt_rtt as _, panic_probe as _}; // global logger + panicking-behavior
 
 use bme688;
@@ -11,13 +9,10 @@ use defmt::*;
 use embassy_executor::Spawner;
 use embassy_sync::{
     blocking_mutex::raw::NoopRawMutex,
-    channel::{Channel, DynamicReceiver, DynamicSender},
     mutex::Mutex,
     signal,
 };
 use embassy_time::Timer;
-use embedded_io_async::Write;
-use micropb::MessageEncode;
 use opt3001;
 
 mod hardware;
@@ -30,41 +25,7 @@ mod storage;
 use storage::Storage;
 mod web;
 
-mod proto {
-    #![allow(clippy::all)]
-    #![allow(nonstandard_style, unused, irrefutable_let_patterns)]
-    include!(concat!(env!("OUT_DIR"), "/proto.rs"));
-}
-
 use picoserve::AppWithStateBuilder;
-use proto::scores_ as scores;
-
-impl From<quality::QualityScore> for scores::QualityScore {
-    fn from(qs: quality::QualityScore) -> Self {
-        scores::QualityScore::default()
-            .init_score(qs.score)
-            .init_co2(scores::SubScore {
-                score: qs.co2.score,
-                measurement: qs.co2.value,
-            })
-            .init_temperature(scores::SubScore {
-                score: qs.temperature.score,
-                measurement: qs.temperature.value,
-            })
-            .init_humidity(scores::SubScore {
-                score: qs.humidity.score,
-                measurement: qs.humidity.value,
-            })
-            .init_illuminance(scores::SubScore {
-                score: qs.illuminance.score,
-                measurement: qs.illuminance.value,
-            })
-            .init_noise(scores::SubScore {
-                score: qs.noise.score,
-                measurement: qs.noise.value,
-            })
-    }
-}
 
 struct Delay;
 
@@ -99,12 +60,6 @@ async fn main(spawner: Spawner) {
         static_cell::StaticCell::new();
     let storage_signal = STORAGE_SIGNAL.init(embassy_sync::signal::Signal::new());
 
-    static SCORES_CHANNEL: static_cell::StaticCell<Channel<NoopRawMutex, scores::QualityScore, 1>> =
-        static_cell::StaticCell::new();
-    let scores_channel = SCORES_CHANNEL.init(Channel::new());
-    let scores_sender = scores_channel.dyn_sender();
-    let scores_receiver = scores_channel.dyn_receiver();
-
     static QUALITY_SCORE: static_cell::StaticCell<Mutex<NoopRawMutex, quality::QualityScore>> =
         static_cell::StaticCell::new();
     let quality_score = QUALITY_SCORE.init(Mutex::new(quality::QualityScore::new()));
@@ -120,7 +75,6 @@ async fn main(spawner: Spawner) {
     spawner.spawn(scd41_task(&i2c_bus, quality_score, quality_score_config).unwrap());
     spawner.spawn(net_task(net_runner).unwrap());
     spawner.spawn(ics_43434_task(mic_sai, quality_score, quality_score_config).unwrap());
-    spawner.spawn(quality_score_task(quality_score, scores_sender).unwrap());
     spawner.spawn(storage_task(storage, storage_signal, quality_score_config).unwrap());
 
     // Ensure DHCP configuration is up before trying connect
@@ -129,23 +83,6 @@ async fn main(spawner: Spawner) {
         "Network stack is up. IP address: {}",
         net_stack.config_v4().unwrap().address
     );
-
-    static RX_BUFFER: static_cell::StaticCell<[u8; 1024]> = static_cell::StaticCell::new();
-    static TX_BUFFER: static_cell::StaticCell<[u8; 1024]> = static_cell::StaticCell::new();
-    let rx_buffer = RX_BUFFER.init([0; 1024]);
-    let tx_buffer = TX_BUFFER.init([0; 1024]);
-    let mut socket = embassy_net::tcp::TcpSocket::new(net_stack, rx_buffer, tx_buffer);
-    socket.set_timeout(Some(embassy_time::Duration::from_secs(10)));
-
-    const SERVER_ADDRESS: Option<&str> = option_env!("SERVER_ADDRESS");
-
-    let server_address = SERVER_ADDRESS
-        .and_then(|server_address| core::net::SocketAddrV4::from_str(server_address).ok());
-    if let Some(server_address) = server_address {
-        spawner.spawn(tcp_client_task(socket, server_address, scores_receiver).unwrap());
-    } else {
-        error!("SERVER_ADDRESS environment variable is not set or invalid");
-    }
 
     let app = picoserve::make_static!(picoserve::AppRouter<web::App>, web::App::new().build_app());
     let app_state = picoserve::make_static!(
@@ -325,49 +262,6 @@ async fn net_task(mut runner: embassy_net::Runner<'static, Ethernet>) -> ! {
 }
 
 #[embassy_executor::task]
-async fn tcp_client_task(
-    mut socket: embassy_net::tcp::TcpSocket<'static>,
-    remote_endpoint: core::net::SocketAddrV4,
-    receiver: DynamicReceiver<'static, scores::QualityScore>,
-) -> ! {
-    let ip_address = embassy_net::Ipv4Address::from(*remote_endpoint.ip());
-    let port = remote_endpoint.port();
-    const CAPACITY: usize = 4 + micropb::size::max_encoded_size::<scores::QualityScore>();
-
-    loop {
-        match socket.connect((ip_address, port)).await {
-            Ok(_) => {
-                info!("Connected to server at {}", remote_endpoint);
-
-                loop {
-                    let reading = receiver.receive().await;
-                    let mut encoder = micropb::PbEncoder::new(heapless::Vec::<u8, CAPACITY>::new());
-                    match reading.encode_len_delimited(&mut encoder) {
-                        Ok(_) => {
-                            if let Err(e) = socket.write_all(encoder.as_writer()).await {
-                                error!("Failed to send data: {:?}", e);
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to encode message: {:?}", e);
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                error!(
-                    "Failed to connect to server at {}: {:?}",
-                    remote_endpoint, e
-                );
-                Timer::after(embassy_time::Duration::from_secs(5)).await;
-                continue;
-            }
-        }
-    }
-}
-
-#[embassy_executor::task]
 async fn ics_43434_task(
     mut mic_sai: embassy_stm32::sai::Sai<'static, embassy_stm32::peripherals::SAI1, u32>,
     quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>,
@@ -409,23 +303,6 @@ async fn ics_43434_task(
                     .update_noise(spl_filtered, &*quality_score_config.lock().await);
             }
         }
-    }
-}
-
-#[embassy_executor::task]
-async fn quality_score_task(
-    quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>,
-    sender: DynamicSender<'static, scores::QualityScore>,
-) {
-    loop {
-        Timer::after(embassy_time::Duration::from_secs(10)).await;
-        let lock = quality_score.lock().await;
-        let current_score = (*lock).clone();
-        drop(lock);
-        info!("Quality Score: {:?}", &current_score);
-
-        // Send the updated quality score to the TCP client task
-        let _ = sender.try_send(current_score.into());
     }
 }
 
