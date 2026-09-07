@@ -1,6 +1,8 @@
 mod api;
+mod handlers;
 mod state;
 
+use picoserve::routing::get;
 pub use state::AppState;
 
 /// The main application struct for the web interface.
@@ -22,6 +24,23 @@ impl<'a> picoserve::AppWithStateBuilder for App<'a> {
     type PathRouter = impl picoserve::routing::PathRouter<Self::State>;
 
     fn build_app(self) -> picoserve::Router<Self::PathRouter, Self::State> {
-        picoserve::Router::new().nest("/api", api::router())
+        picoserve::Router::from_service(
+            const {
+                use picoserve::response::File;
+
+                picoserve::response::Directory {
+                    files: &[
+                        ("", File::html(include_str!("templates/dashboard.html"))),
+                        (
+                            "static/dashboard.js",
+                            File::javascript(include_str!("static/dashboard.js")),
+                        ),
+                    ],
+                    sub_directories: &[],
+                }
+            },
+        )
+        .nest("/api", api::router())
+        .route("/events", get(handlers::events::get_events))
     }
 }
