@@ -1,6 +1,6 @@
 use embassy_net::{Runner, StackResources};
 use embassy_stm32::{
-    Config, bind_interrupts, dma, eth, i2c, mode, peripherals, rcc, rng, sai, time::Hertz,
+    Config, bind_interrupts, dma, eth, flash, i2c, mode, peripherals, rcc, rng, sai, time::Hertz,
 };
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use static_cell::StaticCell;
@@ -30,6 +30,7 @@ pub struct Hardware<'d> {
     pub net_stack: embassy_net::Stack<'d>,
     pub net_runner: Runner<'d, Ethernet>,
     pub mic_sai: sai::Sai<'d, peripherals::SAI1, u32>,
+    pub flash: embassy_embedded_hal::adapter::BlockingAsync<flash::Flash<'d, flash::Blocking>>,
 }
 
 impl<'d> Default for Hardware<'d> {
@@ -159,11 +160,15 @@ impl<'d> Default for Hardware<'d> {
             sai_config,
         );
 
+        let flash = embassy_stm32::flash::Flash::new_blocking(p.FLASH);
+        let flash = embassy_embedded_hal::adapter::BlockingAsync::new(flash);
+
         Hardware {
             i2c_bus,
             net_stack,
             net_runner,
             mic_sai,
+            flash,
         }
     }
 }

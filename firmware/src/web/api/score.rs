@@ -28,11 +28,17 @@ async fn get_score_config(
 }
 /// Handles the POST request for updating the quality score configuration.
 async fn set_score_config(
-    State(QualityScoreConfigState(state)): State<QualityScoreConfigState<'_>>,
-    Json(new_config): Json<QualityScoreConfig>,
+    State(AppState {
+        quality_score_config,
+        quality_score_storage_signal,
+        ..
+    }): State<AppState<'_>>,
+    Json(config): Json<QualityScoreConfig>,
 ) -> impl IntoResponse {
-    let mut config = state.lock().await;
-    *config = new_config;
+    let mut quality_score_config = quality_score_config.lock().await;
+    *quality_score_config = config;
+    // Signal that the quality score configuration has been updated
+    quality_score_storage_signal.signal(());
     StatusCode::NO_CONTENT
 }
 

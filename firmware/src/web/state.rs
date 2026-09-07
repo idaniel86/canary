@@ -1,20 +1,23 @@
 use crate::quality::{QualityScore, QualityScoreConfig};
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex, signal::Signal};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct AppState<'a> {
     pub quality_score: &'a Mutex<NoopRawMutex, QualityScore>,
     pub quality_score_config: &'a Mutex<NoopRawMutex, QualityScoreConfig>,
+    pub quality_score_storage_signal: &'a Signal<NoopRawMutex, ()>,
 }
 
 impl<'a> AppState<'a> {
     pub fn new(
         quality_score: &'a Mutex<NoopRawMutex, QualityScore>,
         quality_score_config: &'a Mutex<NoopRawMutex, QualityScoreConfig>,
+        quality_score_storage_signal: &'a Signal<NoopRawMutex, ()>,
     ) -> Self {
         Self {
             quality_score,
             quality_score_config,
+            quality_score_storage_signal,
         }
     }
 }
