@@ -1,4 +1,4 @@
-use defmt::error;
+use defmt::*;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::Timer;
 use picoserve::{
@@ -9,10 +9,10 @@ use picoserve::{
     },
 };
 
-use crate::{quality::QualityScore, web::state::QualityScoreState};
+use crate::{tasks::Quality, web::state::QualityState};
 
 struct QualityScoreEvents<'d> {
-    quality_score: &'d Mutex<NoopRawMutex, QualityScore>,
+    quality_score: &'d Mutex<NoopRawMutex, Quality>,
 }
 
 impl<'d> EventSource for QualityScoreEvents<'d> {
@@ -21,9 +21,9 @@ impl<'d> EventSource for QualityScoreEvents<'d> {
         mut writer: EventWriter<'_, W>,
     ) -> Result<(), W::Error> {
         loop {
-            let quality_score = self.quality_score.lock().await.clone();
+            let score = self.quality_score.lock().await.score.clone();
             if let Err(_) = writer
-                .write_event("quality_score", Json(&quality_score))
+                .write_event("quality_score", Json(&score))
                 .await
             {
                 error!("Failed to write quality_score event");
@@ -35,9 +35,7 @@ impl<'d> EventSource for QualityScoreEvents<'d> {
     }
 }
 
-pub async fn get_events(
-    State(QualityScoreState(state)): State<QualityScoreState<'_>>,
-) -> impl IntoResponse {
+pub async fn get_events(State(QualityState(state)): State<QualityState<'_>>) -> impl IntoResponse {
     EventStream(QualityScoreEvents {
         quality_score: state,
     })

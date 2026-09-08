@@ -6,8 +6,8 @@ use sequential_storage::{
     map::{MapConfig, MapStorage, PostcardValue},
 };
 
-use crate::quality::QualityScoreConfig;
-impl<'a> PostcardValue<'a> for QualityScoreConfig {}
+use crate::quality::ScoreConfig;
+impl<'a> PostcardValue<'a> for ScoreConfig {}
 
 const FLASH_RANGE: Range<u32> = 0x001FC000..0x00200000;
 type Flash<'d> = adapter::BlockingAsync<flash::Flash<'d, flash::Blocking>>;
@@ -48,7 +48,7 @@ impl<'d> Storage<'d> {
     /// * `Result<(), sequential_storage::Error<flash::Error>>` - Ok if the operation was successful, Err otherwise.
     pub async fn set_score_config(
         &mut self,
-        config: &QualityScoreConfig,
+        config: &ScoreConfig,
     ) -> Result<(), sequential_storage::Error<flash::Error>> {
         // TODO: verify the size of the buffer is sufficient for the serialized data
         let mut buffer = [0u8; 512];
@@ -61,7 +61,7 @@ impl<'d> Storage<'d> {
     /// * `Result<Option<QualityScoreConfig>, sequential_storage::Error<flash::Error>>` - Ok with the configuration if it exists, Err otherwise.
     pub async fn get_score_config(
         &mut self,
-    ) -> Result<Option<QualityScoreConfig>, sequential_storage::Error<flash::Error>> {
+    ) -> Result<Option<ScoreConfig>, sequential_storage::Error<flash::Error>> {
         // TODO: verify the size of the buffer is sufficient for the serialized data
         let mut buffer = [0u8; 512];
         self.inner.fetch_item(&mut buffer, &0).await

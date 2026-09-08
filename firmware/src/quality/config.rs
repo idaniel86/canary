@@ -23,7 +23,7 @@ pub struct ScoreFactorConfig {
 
 /// Configuration for the overall quality score, including the individual environmental score factors.
 #[derive(Debug, Clone, defmt::Format, serde::Serialize, serde::Deserialize)]
-pub struct QualityScoreConfig {
+pub struct ScoreConfig {
     /// Configuration for the CO2 score factor.
     pub co2: ScoreFactorConfig,
     /// Configuration for the temperature score factor.
@@ -36,7 +36,7 @@ pub struct QualityScoreConfig {
     pub noise: ScoreFactorConfig,
 }
 
-impl Default for QualityScoreConfig {
+impl Default for ScoreConfig {
     fn default() -> Self {
         Self {
             co2: ScoreFactorConfig {

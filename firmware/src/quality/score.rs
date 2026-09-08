@@ -1,4 +1,4 @@
-use crate::quality::{QualityScoreConfig, ScorePoint};
+use crate::quality::{ScoreConfig, ScorePoint};
 
 #[derive(Debug, Clone, Default, defmt::Format, serde::Deserialize, serde::Serialize)]
 pub struct Subscore {
@@ -8,7 +8,7 @@ pub struct Subscore {
 
 /// Represents the overall quality score, which is a weighted combination of various environmental factors.
 #[derive(Debug, Clone, Default, defmt::Format, serde::Deserialize, serde::Serialize)]
-pub struct QualityScore {
+pub struct Score {
     /// The overall quality score, which is a weighted combination of various environmental factors.
     pub score: f32,
     /// The subscore for CO2 concentration, which affects cognitive performance and drowsiness.
@@ -23,7 +23,7 @@ pub struct QualityScore {
     pub noise: Subscore,
 }
 
-impl QualityScore {
+impl Score {
     /// Creates a new `QualityScore` instance with default values.
     pub fn new() -> Self {
         Default::default()
@@ -79,7 +79,7 @@ impl QualityScore {
     /// # Arguments
     /// * `value` - The CO2 value for which to update the subscore.
     /// * `config` - The configuration containing the score points for CO2 as part of the overall quality score configuration.
-    pub fn update_co2(&mut self, value: f32, config: &QualityScoreConfig) {
+    pub fn update_co2(&mut self, value: f32, config: &ScoreConfig) {
         self.co2 = Subscore {
             value,
             score: Self::interpolate(value, &config.co2.points),
@@ -92,7 +92,7 @@ impl QualityScore {
     /// # Arguments
     /// * `value` - The temperature value for which to update the subscore.
     /// * `config` - The configuration containing the score points for temperature as part of the overall quality score configuration.
-    pub fn update_temperature(&mut self, value: f32, config: &QualityScoreConfig) {
+    pub fn update_temperature(&mut self, value: f32, config: &ScoreConfig) {
         self.temperature = Subscore {
             value,
             score: Self::interpolate(value, &config.temperature.points),
@@ -105,7 +105,7 @@ impl QualityScore {
     /// # Arguments
     /// * `value` - The humidity value for which to update the subscore.
     /// * `config` - The configuration containing the score points for humidity as part of the overall quality score configuration.
-    pub fn update_humidity(&mut self, value: f32, config: &QualityScoreConfig) {
+    pub fn update_humidity(&mut self, value: f32, config: &ScoreConfig) {
         self.humidity = Subscore {
             value,
             score: Self::interpolate(value, &config.humidity.points),
@@ -118,7 +118,7 @@ impl QualityScore {
     /// # Arguments
     /// * `value` - The illuminance value for which to update the subscore.
     /// * `config` - The configuration containing the score points for illuminance as part of the overall quality score configuration.
-    pub fn update_illuminance(&mut self, value: f32, config: &QualityScoreConfig) {
+    pub fn update_illuminance(&mut self, value: f32, config: &ScoreConfig) {
         self.illuminance = Subscore {
             value,
             score: Self::interpolate(value, &config.illuminance.points),
@@ -131,7 +131,7 @@ impl QualityScore {
     /// # Arguments
     /// * `value` - The noise value for which to update the subscore.
     /// * `config` - The configuration containing the score points for noise as part of the overall quality score configuration.
-    pub fn update_noise(&mut self, value: f32, config: &QualityScoreConfig) {
+    pub fn update_noise(&mut self, value: f32, config: &ScoreConfig) {
         self.noise = Subscore {
             value,
             score: Self::interpolate(value, &config.noise.points),
@@ -146,7 +146,7 @@ impl QualityScore {
     ///
     /// # Returns
     /// The overall quality score as a floating-point value.
-    fn calc_score(&self, config: &QualityScoreConfig) -> f32 {
+    fn calc_score(&self, config: &ScoreConfig) -> f32 {
         self.co2.score * config.co2.weight
             + self.temperature.score * config.temperature.weight
             + self.humidity.score * config.humidity.weight

@@ -6,34 +6,55 @@ use {defmt_rtt as _, panic_probe as _}; // global logger + panicking-behavior
 
 use bme688;
 use defmt::*;
-use embassy_executor::Spawner;
-use embassy_sync::{
-    blocking_mutex::raw::NoopRawMutex,
-    mutex::Mutex,
-    signal,
-};
-use embassy_time::Timer;
-use opt3001;
-
-mod hardware;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
-use hardware::{Ethernet, Hardware, I2cBus};
+use embassy_executor::Spawner;
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
+use embassy_time::{Duration, Timer};
+use hardware::Hardware;
+use opt3001;
+use picoserve::AppWithStateBuilder;
+
 mod filters;
+mod hardware;
 mod ics43434;
 mod quality;
 mod storage;
 use storage::Storage;
+mod tasks;
 mod web;
 
-use picoserve::AppWithStateBuilder;
-
-struct Delay;
+pub struct Delay;
 
 impl embedded_hal_async::delay::DelayNs for Delay {
     async fn delay_ns(&mut self, ns: u32) {
         Timer::after(embassy_time::Duration::from_nanos(ns as u64)).await;
     }
 }
+
+pub type Opt3001Sensor = opt3001::Opt3001<
+    I2cDevice<
+        'static,
+        NoopRawMutex,
+        embassy_stm32::i2c::I2c<'static, embassy_stm32::mode::Async, embassy_stm32::i2c::Master>,
+    >,
+>;
+pub type Scd41Sensor = scd4x::Scd4xAsync<
+    I2cDevice<
+        'static,
+        NoopRawMutex,
+        embassy_stm32::i2c::I2c<'static, embassy_stm32::mode::Async, embassy_stm32::i2c::Master>,
+    >,
+    Delay,
+>;
+pub type Bme688Sensor = bme688::Bme688<
+    I2cDevice<
+        'static,
+        NoopRawMutex,
+        embassy_stm32::i2c::I2c<'static, embassy_stm32::mode::Async, embassy_stm32::i2c::Master>,
+    >,
+    Delay,
+    bme688::Init,
+>;
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -42,7 +63,7 @@ async fn main(spawner: Spawner) {
         i2c_bus,
         net_stack,
         net_runner,
-        mic_sai,
+        mut mic_sai,
         flash,
     } = Hardware::default();
 
@@ -56,94 +77,47 @@ async fn main(spawner: Spawner) {
         .unwrap()
         .unwrap_or_default();
 
-    static STORAGE_SIGNAL: static_cell::StaticCell<embassy_sync::signal::Signal<NoopRawMutex, ()>> =
+    static SHARED_STATE: static_cell::StaticCell<tasks::SharedState> =
         static_cell::StaticCell::new();
-    let storage_signal = STORAGE_SIGNAL.init(embassy_sync::signal::Signal::new());
+    let shared_state = SHARED_STATE.init(tasks::SharedState {
+        quality: Mutex::new(tasks::Quality {
+            score: quality::Score::new(),
+            score_config,
+        }),
+        storage_signal: embassy_sync::signal::Signal::new(),
+    });
 
-    static QUALITY_SCORE: static_cell::StaticCell<Mutex<NoopRawMutex, quality::QualityScore>> =
+    static READING_CHANNEL: static_cell::StaticCell<tasks::ReadingChannel> =
         static_cell::StaticCell::new();
-    let quality_score = QUALITY_SCORE.init(Mutex::new(quality::QualityScore::new()));
+    let reading_channel = READING_CHANNEL.init(embassy_sync::channel::Channel::new());
 
-    static QUALITY_SCORE_CONFIG: static_cell::StaticCell<
-        Mutex<NoopRawMutex, quality::QualityScoreConfig>,
-    > = static_cell::StaticCell::new();
-    let quality_score_config = QUALITY_SCORE_CONFIG.init(Mutex::new(score_config));
+    static AUDIO_CHANNEL: static_cell::StaticCell<tasks::AudioChannel> =
+        static_cell::StaticCell::new();
+    let audio_channel = AUDIO_CHANNEL.init(embassy_sync::pubsub::PubSubChannel::new());
 
-    // Spawn tasks
-    spawner.spawn(opt3001_task(&i2c_bus, quality_score, quality_score_config).unwrap());
-    spawner.spawn(bme688_task(&i2c_bus).unwrap());
-    spawner.spawn(scd41_task(&i2c_bus, quality_score, quality_score_config).unwrap());
-    spawner.spawn(net_task(net_runner).unwrap());
-    spawner.spawn(ics_43434_task(mic_sai, quality_score, quality_score_config).unwrap());
-    spawner.spawn(storage_task(storage, storage_signal, quality_score_config).unwrap());
-
-    // Ensure DHCP configuration is up before trying connect
-    net_stack.wait_config_up().await;
-    info!(
-        "Network stack is up. IP address: {}",
-        net_stack.config_v4().unwrap().address
-    );
-
-    let app = picoserve::make_static!(picoserve::AppRouter<web::App>, web::App::new().build_app());
-    let app_state = picoserve::make_static!(
-        web::AppState,
-        web::AppState::new(quality_score, quality_score_config, storage_signal)
-    );
-
-    for task_id in 0..WEB_TASK_POOL_SIZE {
-        spawner.spawn(web_task(task_id, net_stack, app, app_state).unwrap());
-    }
-
-    loop {
-        info!("Heartbeat...");
-        Timer::after(embassy_time::Duration::from_secs(60)).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn opt3001_task(
-    i2c_bus: &'static I2cBus<'static>,
-    quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>,
-    quality_score_config: &'static Mutex<NoopRawMutex, quality::QualityScoreConfig>,
-) {
-    let quality_score_config_lock = quality_score_config.lock().await;
-    let mut illuminance_filter = filters::LowPassFilter::new(
-        quality_score_config_lock.illuminance.filter_tau_seconds,
-        None,
-    );
-    drop(quality_score_config_lock);
-
-    let mut sensor =
+    let mut opt3001_sensor: Opt3001Sensor =
         opt3001::Opt3001::new(I2cDevice::new(&i2c_bus), opt3001::SlaveAddress::default());
-    sensor
+    opt3001_sensor
         .set_conversion_mode(opt3001::ConversionMode::Continuous)
         .await
         .map_err(|e| error!("Error setting conversion mode: {:?}", e))
         .unwrap();
 
-    loop {
-        Timer::after(embassy_time::Duration::from_millis(800)).await;
-        if let Ok(status) = sensor.get_status().await {
-            if status.is_conversion_ready {
-                if let Ok(illuminance) = sensor
-                    .get_result()
-                    .await
-                    .map_err(|e| error!("Error reading light intensity: {:?}", e))
-                {
-                    let illuminance = illuminance_filter.process(illuminance as f32);
-                    quality_score
-                        .lock()
-                        .await
-                        .update_illuminance(illuminance, &*quality_score_config.lock().await);
-                }
-            }
-        }
-    }
-}
+    let mut scd41_sensor = scd4x::Scd4xAsync::new(I2cDevice::new(&i2c_bus), Delay);
+    let _ = scd41_sensor.stop_periodic_measurement().await;
+    scd41_sensor
+        .reinit()
+        .await
+        .map_err(|e| error!("Error reinit SCD41: {:?}", e))
+        .unwrap();
 
-#[embassy_executor::task]
-async fn bme688_task(i2c_bus: &'static I2cBus<'static>) {
-    let mut sensor = bme688::Bme688::new(
+    scd41_sensor
+        .start_periodic_measurement()
+        .await
+        .map_err(|e| error!("Error starting SCD41 periodic measurement: {:?}", e))
+        .unwrap();
+
+    let mut bme688_sensor = bme688::Bme688::new(
         I2cDevice::new(&i2c_bus),
         bme688::SlaveAddress::default(),
         Delay,
@@ -175,7 +149,7 @@ async fn bme688_task(i2c_bus: &'static I2cBus<'static>) {
         )
         .build();
 
-    let duration_us = sensor
+    let duration_us = bme688_sensor
         .start_sequential_measurement(&config)
         .await
         .map_err(|e| error!("Error starting BME688 sequential measurement: {:?}", e))
@@ -185,160 +159,41 @@ async fn bme688_task(i2c_bus: &'static I2cBus<'static>) {
         + embassy_time::Duration::from_millis(280))
         * 3;
 
-    loop {
-        Timer::after(duration).await;
+    mic_sai.start().map_err(|e| error!("Error starting MIC SAI: {:?}", e)).unwrap();
 
-        if let Ok(measurements) = sensor
-            .get_measurements()
-            .await
-            .map_err(|e| error!("Error reading BME688 measurements: {:?}", e))
-        {
-            for _measurement in measurements.iter() {}
-        }
-    }
-}
-
-#[embassy_executor::task]
-async fn scd41_task(
-    i2c_bus: &'static I2cBus<'static>,
-    quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>,
-    quality_score_config: &'static Mutex<NoopRawMutex, quality::QualityScoreConfig>,
-) {
-    let quality_score_config_lock = quality_score_config.lock().await;
-    let mut co2_filter =
-        filters::LowPassFilter::new(quality_score_config_lock.co2.filter_tau_seconds, None);
-    let mut temperature_filter = filters::LowPassFilter::new(
-        quality_score_config_lock.temperature.filter_tau_seconds,
-        None,
+    spawner.spawn(tasks::sai_task(mic_sai, audio_channel).unwrap());
+    spawner.spawn(
+        tasks::opt3001_task(opt3001_sensor, Duration::from_millis(800), reading_channel).unwrap(),
     );
-    let mut humidity_filter =
-        filters::LowPassFilter::new(quality_score_config_lock.humidity.filter_tau_seconds, None);
-    drop(quality_score_config_lock);
+    spawner
+        .spawn(tasks::scd41_task(scd41_sensor, Duration::from_secs(5), reading_channel).unwrap());
+    spawner.spawn(
+        tasks::ics43434_task(Duration::from_secs(1), audio_channel, reading_channel).unwrap(),
+    );
+    spawner.spawn(tasks::bme688_task(bme688_sensor, duration, reading_channel).unwrap());
+    spawner.spawn(tasks::aggregator_task(shared_state, reading_channel).unwrap());
+    spawner.spawn(tasks::net_task(net_runner).unwrap());
+    spawner.spawn(tasks::storage_task(storage, shared_state).unwrap());
 
-    let mut sensor = scd4x::Scd4xAsync::new(I2cDevice::new(&i2c_bus), Delay);
-    let _ = sensor.stop_periodic_measurement().await;
-    sensor
-        .reinit()
-        .await
-        .map_err(|e| error!("Error reinit SCD41: {:?}", e))
-        .unwrap();
+    // Ensure DHCP configuration is up before trying connect
+    net_stack.wait_config_up().await;
+    info!(
+        "Network stack is up. IP address: {}",
+        net_stack.config_v4().unwrap().address
+    );
 
-    sensor
-        .start_periodic_measurement()
-        .await
-        .map_err(|e| error!("Error starting SCD41 periodic measurement: {:?}", e))
-        .unwrap();
+    let app = picoserve::make_static!(picoserve::AppRouter<web::App>, web::App::new().build_app());
+    let app_state = picoserve::make_static!(
+        web::AppState,
+        web::AppState::new(&shared_state.quality, &shared_state.storage_signal),
+    );
 
-    loop {
-        Timer::after(embassy_time::Duration::from_secs(5)).await;
-        if let Ok(is_data_ready) = sensor
-            .data_ready_status()
-            .await
-            .map_err(|e| error!("Error reading SCD41 data ready status: {:?}", e))
-        {
-            if is_data_ready {
-                if let Ok(measurement) = sensor
-                    .measurement()
-                    .await
-                    .map_err(|e| error!("Error reading SCD41 measurement: {:?}", e))
-                {
-                    let co2_filtered = co2_filter.process(measurement.co2 as f32);
-                    let temperature_filtered = temperature_filter.process(measurement.temperature);
-                    let humidity_filtered = humidity_filter.process(measurement.humidity);
-                    let mut lock = quality_score.lock().await;
-                    let config_lock = quality_score_config.lock().await;
-                    lock.update_co2(co2_filtered, &config_lock);
-                    lock.update_temperature(temperature_filtered, &config_lock);
-                    lock.update_humidity(humidity_filtered, &config_lock);
-                }
-            }
-        }
+    for task_id in 0..tasks::WEB_TASK_POOL_SIZE {
+        spawner.spawn(tasks::web_task(task_id, net_stack, app, app_state).unwrap());
     }
-}
-
-#[embassy_executor::task]
-async fn net_task(mut runner: embassy_net::Runner<'static, Ethernet>) -> ! {
-    runner.run().await
-}
-
-#[embassy_executor::task]
-async fn ics_43434_task(
-    mut mic_sai: embassy_stm32::sai::Sai<'static, embassy_stm32::peripherals::SAI1, u32>,
-    quality_score: &'static Mutex<NoopRawMutex, quality::QualityScore>,
-    quality_score_config: &'static Mutex<NoopRawMutex, quality::QualityScoreConfig>,
-) {
-    let quality_score_config_lock = quality_score_config.lock().await;
-    let mut spl_filter =
-        filters::LowPassFilter::new(quality_score_config_lock.noise.filter_tau_seconds, None);
-    drop(quality_score_config_lock);
-
-    let mut ics_43434 = ics43434::Ics43434::new();
-    let mut raw_audio_frame = [1u32; 1024]; // Buffer to hold raw audio samples
-
-    const SAMPLE_RATE: u32 = 48_000;
-
-    let mut sample_count = 0;
-
-    mic_sai.start().unwrap_or_else(|e| {
-        error!("Failed to start SAI interface: {:?}", e);
-    });
 
     loop {
-        if let Err(e) = mic_sai.read(&mut raw_audio_frame).await {
-            error!("Error reading from ICS-43434 microphone: {:?}", e);
-            continue;
-        }
-
-        for &raw_sample in raw_audio_frame.iter() {
-            ics_43434.process(raw_sample);
-
-            sample_count += 1;
-            if sample_count >= SAMPLE_RATE {
-                sample_count = 0;
-                let spl = ics_43434.get_spl();
-                let spl_filtered = spl_filter.process(spl);
-                quality_score
-                    .lock()
-                    .await
-                    .update_noise(spl_filtered, &*quality_score_config.lock().await);
-            }
-        }
-    }
-}
-
-static CONFIG: picoserve::Config = picoserve::Config::const_default().keep_connection_alive();
-
-const WEB_TASK_POOL_SIZE: usize = 1;
-
-#[embassy_executor::task(pool_size = WEB_TASK_POOL_SIZE)]
-async fn web_task(
-    task_id: usize,
-    stack: embassy_net::Stack<'static>,
-    app: &'static picoserve::AppRouter<web::App<'static>>,
-    state: &'static web::AppState<'static>,
-) {
-    let port = 80;
-    let mut tcp_rx_buffer = [0; 1024];
-    let mut tcp_tx_buffer = [0; 1024];
-    let mut http_buffer = [0; 4096];
-
-    picoserve::Server::new(&app.shared().with_state(state), &CONFIG, &mut http_buffer)
-        .listen_and_serve(task_id, stack, port, &mut tcp_rx_buffer, &mut tcp_tx_buffer)
-        .await
-        .into_never()
-}
-
-#[embassy_executor::task]
-async fn storage_task(
-    mut storage: Storage<'static>,
-    signal: &'static signal::Signal<NoopRawMutex, ()>,
-    quality_score_config: &'static Mutex<NoopRawMutex, quality::QualityScoreConfig>,
-) {
-    loop {
-        let _ = signal.wait().await;
-        let config = quality_score_config.lock().await;
-        if let Err(e) = storage.set_score_config(&*config).await {
-            error!("Failed to set score config: {:?}", e);
-        }
+        info!("Heartbeat...");
+        Timer::after(embassy_time::Duration::from_secs(60)).await;
     }
 }

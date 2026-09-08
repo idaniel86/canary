@@ -1,9 +1,6 @@
 use crate::{
-    quality::QualityScoreConfig,
-    web::{
-        AppState,
-        state::{QualityScoreConfigState, QualityScoreState},
-    },
+    quality::ScoreConfig,
+    web::{AppState, state::QualityState},
 };
 use picoserve::{
     Router,
@@ -21,31 +18,30 @@ pub fn router<'a>() -> Router<impl PathRouter<AppState<'a>>, AppState<'a>> {
 
 /// Handles the GET request for retrieving the current quality score configuration.
 async fn get_score_config(
-    State(QualityScoreConfigState(state)): State<QualityScoreConfigState<'_>>,
+    State(QualityState(state)): State<QualityState<'_>>,
 ) -> impl IntoResponse {
-    let config = state.lock().await;
-    Json(config.clone())
+    let quality = state.lock().await;
+    Json(quality.score_config.clone())
 }
 /// Handles the POST request for updating the quality score configuration.
 async fn set_score_config(
     State(AppState {
-        quality_score_config,
-        quality_score_storage_signal,
-        ..
+        quality,
+        storage_signal,
     }): State<AppState<'_>>,
-    Json(config): Json<QualityScoreConfig>,
+    Json(config): Json<ScoreConfig>,
 ) -> impl IntoResponse {
-    let mut quality_score_config = quality_score_config.lock().await;
-    *quality_score_config = config;
+    let mut quality = quality.lock().await;
+    quality.score_config = config;
     // Signal that the quality score configuration has been updated
-    quality_score_storage_signal.signal(());
+    storage_signal.signal(());
     StatusCode::NO_CONTENT
 }
 
 /// Handles the GET request for retrieving the current quality score.
 async fn get_current_score(
-    State(QualityScoreState(state)): State<QualityScoreState<'_>>,
+    State(QualityState(state)): State<QualityState<'_>>,
 ) -> impl IntoResponse {
-    let config = state.lock().await;
-    Json(config.clone())
+    let quality = state.lock().await;
+    Json(quality.score.clone())
 }
