@@ -43,5 +43,5 @@ async fn get_current_score(
     State(QualityState(state)): State<QualityState<'_>>,
 ) -> impl IntoResponse {
     let quality = state.lock().await;
-    Json(quality.score.clone())
+    Json(quality.subscores.snapshot(&quality.model, &quality.score_config))
 }

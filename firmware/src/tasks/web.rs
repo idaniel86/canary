@@ -3,7 +3,7 @@ use crate::web;
 static CONFIG: picoserve::Config = picoserve::Config::const_default().keep_connection_alive();
 
 /// The size of the task pool for the web server task.
-/// 
+///
 /// At least 2 tasks are required for the web server to function correctly (one for SSE and one for handling regular HTTP requests).
 pub const WEB_TASK_POOL_SIZE: usize = 2;
 

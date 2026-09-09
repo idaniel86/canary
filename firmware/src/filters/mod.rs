@@ -15,15 +15,14 @@ impl LowPassFilter {
     ///
     /// # Arguments
     /// * `tau` - The time constant for the low-pass filter, which determines how quickly the filter responds to changes in input.
-    /// * `initial_output` - The initial output value of the filter, which is used as the starting point for filtering.
     ///
     /// # Returns
     /// * `Self` - A new instance of the LowPassFilter.
-    pub fn new(tau: f32, initial_output: Option<f32>) -> Self {
+    pub fn new(tau: f32) -> Self {
         Self {
             tau,
             last_time: Instant::now(),
-            prev_output: initial_output,
+            prev_output: None,
         }
     }
 

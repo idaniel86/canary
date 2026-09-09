@@ -21,11 +21,11 @@ impl<'d> EventSource for QualityScoreEvents<'d> {
         mut writer: EventWriter<'_, W>,
     ) -> Result<(), W::Error> {
         loop {
-            let score = self.quality_score.lock().await.score.clone();
-            if let Err(_) = writer
-                .write_event("quality_score", Json(&score))
-                .await
-            {
+            let score = {
+                let quality = self.quality_score.lock().await;
+                quality.subscores.snapshot(&quality.model, &quality.score_config)
+            };
+            if let Err(_) = writer.write_event("quality_score", Json(&score)).await {
                 error!("Failed to write quality_score event");
                 writer.write_keepalive().await?;
             }

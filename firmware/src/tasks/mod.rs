@@ -15,13 +15,15 @@ pub use net::net_task;
 pub use opt3001::opt3001_task;
 pub use sai::{AudioChannel, sai_task};
 pub use scd41::scd41_task;
-pub use web::{WEB_TASK_POOL_SIZE, web_task};
 pub use storage::storage_task;
+pub use web::{WEB_TASK_POOL_SIZE, web_task};
 
-use crate::quality::{Score, ScoreConfig};
+use crate::quality::{Subscores, ScoreConfig};
+use crate::quality::AnyQualityModel;
 
 pub struct Quality {
-    pub score: Score,
+    pub subscores: Subscores,
+    pub model: AnyQualityModel,
     pub score_config: ScoreConfig,
 }
 

@@ -2,6 +2,8 @@
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
 
+use crate::quality::{AnyQualityModel, Subscores, WeightedQualityModel};
+
 use {defmt_rtt as _, panic_probe as _}; // global logger + panicking-behavior
 
 use bme688;
@@ -81,7 +83,8 @@ async fn main(spawner: Spawner) {
         static_cell::StaticCell::new();
     let shared_state = SHARED_STATE.init(tasks::SharedState {
         quality: Mutex::new(tasks::Quality {
-            score: quality::Score::new(),
+            subscores: Subscores::new(&score_config),
+            model: AnyQualityModel::Weighted(WeightedQualityModel{}),
             score_config,
         }),
         storage_signal: embassy_sync::signal::Signal::new(),
@@ -159,7 +162,10 @@ async fn main(spawner: Spawner) {
         + embassy_time::Duration::from_millis(280))
         * 3;
 
-    mic_sai.start().map_err(|e| error!("Error starting MIC SAI: {:?}", e)).unwrap();
+    mic_sai
+        .start()
+        .map_err(|e| error!("Error starting MIC SAI: {:?}", e))
+        .unwrap();
 
     spawner.spawn(tasks::sai_task(mic_sai, audio_channel).unwrap());
     spawner.spawn(
