@@ -1,5 +1,5 @@
-use crate::quality::{Subscores, ScoreConfig};
 use crate::quality::models::QualityModel;
+use crate::quality::{ScoreConfig, Subscores};
 
 pub struct WeightedQualityModel {}
 

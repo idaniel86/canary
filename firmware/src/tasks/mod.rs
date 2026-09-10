@@ -18,8 +18,8 @@ pub use scd41::scd41_task;
 pub use storage::storage_task;
 pub use web::{WEB_TASK_POOL_SIZE, web_task};
 
-use crate::quality::{Subscores, ScoreConfig};
 use crate::quality::AnyQualityModel;
+use crate::quality::{ScoreConfig, Subscores};
 
 pub struct Quality {
     pub subscores: Subscores,

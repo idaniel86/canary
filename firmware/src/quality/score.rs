@@ -1,4 +1,7 @@
-use crate::{filters::LowPassFilter, quality::{Reading, ScoreConfig, ScorePoint, models::QualityModel}};
+use crate::{
+    filters::LowPassFilter,
+    quality::{Reading, ScoreConfig, ScorePoint, models::QualityModel},
+};
 
 /// Interpolates the score for a given value based on the provided score points.
 ///
@@ -63,10 +66,10 @@ struct FactorState {
 
 impl FactorState {
     /// Creates a new `FactorState`
-    /// 
+    ///
     /// # Arguments
     /// * `filter_tau_seconds` - The time constant for the low-pass filter applied to this environmental factor.
-    /// 
+    ///
     /// # Returns
     /// A new instance of `FactorState`..
     pub fn new(filter_tau_seconds: f32) -> Self {
@@ -116,7 +119,7 @@ impl Subscores {
     pub fn co2(&self) -> &Subscore {
         &self.co2.subscore
     }
-    
+
     pub fn temperature(&self) -> &Subscore {
         &self.temperature.subscore
     }
@@ -136,19 +139,19 @@ impl Subscores {
     pub fn update(&mut self, reading: Reading, config: &ScoreConfig) {
         match reading {
             Reading::Co2(value) => {
-                self.co2.update(value, &config.co2.points);
+                self.co2.update(value, &config.co2.curve);
             }
             Reading::Temperature(value) => {
-                self.temperature.update(value, &config.temperature.points);
+                self.temperature.update(value, &config.temperature.curve);
             }
             Reading::Humidity(value) => {
-                self.humidity.update(value, &config.humidity.points);
+                self.humidity.update(value, &config.humidity.curve);
             }
             Reading::Illuminance(value) => {
-                self.illuminance.update(value, &config.illuminance.points);
+                self.illuminance.update(value, &config.illuminance.curve);
             }
             Reading::Noise(value) => {
-                self.noise.update(value, &config.noise.points);
+                self.noise.update(value, &config.noise.curve);
             }
         }
     }

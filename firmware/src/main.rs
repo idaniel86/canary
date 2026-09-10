@@ -2,7 +2,7 @@
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
 
-use crate::quality::{AnyQualityModel, Subscores, WeightedQualityModel};
+use crate::quality::{AnyQualityModel, NonLinearQualityModel, Subscores, WeightedQualityModel};
 
 use {defmt_rtt as _, panic_probe as _}; // global logger + panicking-behavior
 
@@ -76,7 +76,7 @@ async fn main(spawner: Spawner) {
         .get_score_config()
         .await
         .map_err(|e| error!("Failed to get score config: {:?}", e))
-        .unwrap()
+        .unwrap_or_default()
         .unwrap_or_default();
 
     static SHARED_STATE: static_cell::StaticCell<tasks::SharedState> =
@@ -84,7 +84,7 @@ async fn main(spawner: Spawner) {
     let shared_state = SHARED_STATE.init(tasks::SharedState {
         quality: Mutex::new(tasks::Quality {
             subscores: Subscores::new(&score_config),
-            model: AnyQualityModel::Weighted(WeightedQualityModel{}),
+            model: AnyQualityModel::NonLinear(NonLinearQualityModel {}),
             score_config,
         }),
         storage_signal: embassy_sync::signal::Signal::new(),

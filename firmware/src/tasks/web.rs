@@ -17,7 +17,7 @@ pub async fn web_task(
     let port = 80;
     let mut tcp_rx_buffer = [0; 1024];
     let mut tcp_tx_buffer = [0; 1024];
-    let mut http_buffer = [0; 4096];
+    let mut http_buffer = [0; 4096 * 2];
 
     picoserve::Server::new(&app.shared().with_state(state), &CONFIG, &mut http_buffer)
         .listen_and_serve(task_id, stack, port, &mut tcp_rx_buffer, &mut tcp_tx_buffer)

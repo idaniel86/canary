@@ -23,7 +23,9 @@ impl<'d> EventSource for QualityScoreEvents<'d> {
         loop {
             let score = {
                 let quality = self.quality_score.lock().await;
-                quality.subscores.snapshot(&quality.model, &quality.score_config)
+                quality
+                    .subscores
+                    .snapshot(&quality.model, &quality.score_config)
             };
             if let Err(_) = writer.write_event("quality_score", Json(&score)).await {
                 error!("Failed to write quality_score event");

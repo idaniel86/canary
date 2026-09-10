@@ -7,7 +7,11 @@ pub async fn aggregator_task(state: &'static SharedState, receiver: &'static Rea
     loop {
         let reading = receiver.receive().await;
         let mut lock = state.quality.lock().await;
-        let Quality { subscores, score_config , ..} = &mut *lock;
+        let Quality {
+            subscores,
+            score_config,
+            ..
+        } = &mut *lock;
         subscores.update(reading, &score_config);
     }
 }
